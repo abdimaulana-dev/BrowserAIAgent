@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+.local/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

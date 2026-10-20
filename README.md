@@ -40,7 +40,7 @@ local-pc-agent-harness/
 
 ## 1. Set up and start the server
 
-Open PowerShell in the project folder and run:
+Double-click `setup.bat` in the project folder. Or run this from PowerShell:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
@@ -48,7 +48,7 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1
 
 Setup creates a virtual environment, installs dependencies, generates a private token in `.env`, and prepares the workspace at `PC-Agent-Workspace` in your user folder. It also creates a ready-to-import userscript at `.local\tampermonkey_harness.user.js`.
 
-Start the server with:
+Double-click `start.bat` to run the server. Or use PowerShell:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\start.ps1

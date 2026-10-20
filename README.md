@@ -60,13 +60,13 @@ Keep the PowerShell window open while using the bridge. To choose another worksp
 
 1. Open Tampermonkey and choose **Create a new script**.
 2. Open `.local\tampermonkey_harness.user.js`, copy its contents into the editor, and save.
-3. Reload Gemini. Leave **Auto-execute read-only tools** and **Auto-send reply in chat** disabled for initial tests.
+3. Reload Gemini. Enable **Auto-execute read-only tools** when you want read-only calls to run automatically after their `exect` marker. That toggle is off by default. **Auto-send reply in chat** controls ordinary tool replies; approved shell commands always send a running acknowledgement and then their final result to Gemini.
 
 The generated script contains the same token as `.env`. Both files are ignored by Git. Keep them private; this token is a basic local guard rather than a strong security boundary against other software running as your Windows user.
 
 ## 3. Test the connection
 
-For a reusable prompt with all current tools and the security rules, copy [`docs/INITIAL_PROMPT.md`](docs/INITIAL_PROMPT.md) into Gemini.
+For a reusable prompt with all current tools and the security rules, open [`docs/INITIAL_PROMPT.md`](docs/INITIAL_PROMPT.md) and use the code block's copy button to copy the full prompt into Gemini.
 
 Open `http://127.0.0.1:5050/health` in your browser. Expected response:
 
@@ -113,7 +113,7 @@ For `read_file`, `filename` must be a path relative to the workspace. Tool calls
 | `move_file` | `{"source":"draft.txt","destination":"archive/draft.txt"}` | Moves or renames a file without overwriting |
 | `get_file_info` | `{"filename":"notes.txt"}` | Returns size and modified time |
 | `preview_file` | `{"filename":"notes.txt"}` | Returns a short text preview |
-| `run_command` | `{"command":"Get-ChildItem","purpose":"List workspace files"}` | Shows an approval dialog with the exact command and purpose before running it in the workspace |
+| `run_command` | `{"command":"Get-ChildItem","purpose":"List workspace files"}` | Shows an approval dialog, immediately reports approval to Gemini, waits up to 60 seconds, then sends the command result |
 
 Shell commands run with your Windows account's permissions and can affect files or settings outside the workspace. The browser approval dialog is an important safeguard, but it is not an OS security boundary. Only approve commands you understand. Shell commands cannot be auto-executed.
 

@@ -33,6 +33,7 @@ MAX_LIST_ENTRIES = 500
 MAX_SEARCH_FILES = 2000
 MAX_SEARCH_MATCHES = 100
 MAX_COMMAND_OUTPUT = 8000
+COMMAND_TIMEOUT_SECONDS = 60
 
 
 def _auth_token() -> str:
@@ -318,7 +319,7 @@ def tool_run_command(args: dict) -> dict:
     try:
         with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
             completed = subprocess.run(command, shell=True, cwd=WORKSPACE_DIR, stdout=stdout,
-                                       stderr=stderr, timeout=15)
+                                       stderr=stderr, timeout=COMMAND_TIMEOUT_SECONDS)
             stdout.seek(0)
             stderr.seek(0)
             output = stdout.read(MAX_COMMAND_OUTPUT + 1)
@@ -329,7 +330,7 @@ def tool_run_command(args: dict) -> dict:
                 "output_truncated": len(output) > MAX_COMMAND_OUTPUT or len(errors) > MAX_COMMAND_OUTPUT,
                 "purpose": purpose}
     except subprocess.TimeoutExpired as exc:
-        raise ValueError("Command exceeded the 15-second time limit.") from exc
+        raise ValueError(f"Command exceeded the {COMMAND_TIMEOUT_SECONDS}-second time limit.") from exc
 
 
 TOOLS = {

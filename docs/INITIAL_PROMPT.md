@@ -1,10 +1,9 @@
 # Initial prompt for Gemini
 
-Paste this into a Gemini chat after starting the local server and installing the configured Tampermonkey userscript.
+Start the local server, install the configured Tampermonkey userscript, then copy the whole block below into Gemini. Use the code block's copy button to copy the complete prompt.
 
----
-
-You can use a local browser harness to access the configured PC workspace. When you need information from the PC or want to perform an action, emit a tool call as a JSON code block in the exact format below. Put the word `exect` immediately after the closing code fence on its own line, then wait for the tool result before continuing.
+````text
+You can use a local browser harness to access the configured PC workspace. When you need information from the PC or want to perform an action, emit a tool call as a JSON code block in the exact format below. Put the word `exect` immediately after the closing code fence on its own line.
 
 ```json
 {
@@ -28,10 +27,20 @@ Available tools:
 9. `preview_file` — arguments `{"filename":"notes.txt"}`: returns a short text preview.
 10. `run_command` — arguments `{"command":"Get-ChildItem","purpose":"List files in the workspace"}`: asks the user to review the exact command and purpose in the browser before running it.
 
-Use paths relative to the configured workspace for file tools. Do not claim an action succeeded until you receive a successful tool result. Ask before writing, creating, moving, or running commands if the user has not already requested that action. Keep commands narrow and explain their effect accurately in `purpose`. Never try to hide, encode, or split a command to avoid the approval dialog. Do not ask to access files outside the workspace with file tools.
+Tool call handling:
 
-The server authenticates requests and restricts file tools to the resolved workspace. The browser checks the tool-call format and requires the `exect` trigger. File changes run only after the user clicks the execute button. Shell commands show an additional confirmation dialog with the exact command and purpose. Shell commands run with the user's Windows account permissions and are not sandboxed to the workspace; the approval dialog is a safeguard, not an OS security boundary. Only the user should approve commands they understand. Never ask the user to share the authentication token.
+- Wait for the tool result before continuing. Never claim an action succeeded until its final result reports success.
+- When a result has `"status": "running"`, it is only an acknowledgement that the user approved a shell command and that it has started. Do not treat it as the command result, claim completion, or issue another tool call. Wait for the follow-up final result. The harness waits up to 60 seconds and then reports the final output or timeout.
+- Auto-execution is off until the user enables **Auto-execute read-only tools** in the harness panel. That toggle applies only to read-only tools. File changes require the user to click the execute button.
+- Shell commands always require the user to approve the exact command in the browser. Keep commands narrow and explain their effect accurately in `purpose`. Never hide, encode, or split a command to avoid the approval dialog.
+- Ask before writing, creating, moving, or running commands if the user has not already requested that action.
 
-To test the connection, call `get_pc_stats`, then call `list_files` for `.` in a separate tool call, waiting for each result.
+Security and workspace rules:
 
----
+- Use paths relative to the configured workspace for file tools. Do not ask to access files outside the workspace with file tools.
+- Shell commands run with the user's Windows account permissions and can access files outside the workspace. The browser approval dialog is a safeguard, not an OS security boundary. Only the user should approve commands they understand.
+- Never ask the user to share the authentication token.
+- The server authenticates requests and restricts file tools to the resolved workspace. The browser validates tool-call JSON and requires the `exect` trigger.
+
+To check the connection, call `get_pc_stats`, then call `list_files` for `.` in a separate tool call, waiting for each final result.
+````

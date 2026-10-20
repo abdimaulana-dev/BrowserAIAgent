@@ -7,7 +7,7 @@ This project can read and write files in a local workspace. Treat it as code tha
 - **Keep the server local.** It should bind to `127.0.0.1`, not `0.0.0.0` or a public interface.
 - **Protect the token.** The same token is stored in the server environment and the Tampermonkey script. Do not commit it, share screenshots showing it, or paste it into public chats. Anyone who obtains it and can reach the local endpoint may be able to call the exposed tools.
 - **Avoid sensitive files.** The read tool returns file content to the browser chat, where it may be processed by the AI service.
-- **No arbitrary command execution.** The current server intentionally does not expose shell commands, process launch, or general application control.
+- **Shell commands require careful review.** `run_command` runs arbitrary commands with your Windows account's permissions. The userscript displays the exact command and its stated purpose and requires an explicit Accept or Reject choice; shell commands are excluded from auto-execution. This approval is enforced in the browser UI: a client that already has the token can call the server directly. It is not an OS-level sandbox and cannot prevent an approved command from accessing files or settings outside the configured workspace. Only approve commands you understand.
 - **Prototype, not a hardened security sandbox.** Path validation is helpful but does not eliminate all filesystem race conditions or risks from software running under the same Windows account.
 - **Inspect responses before sending.** Auto-send is optional; leave it off while testing.
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Browser Chat PC Agent Harness (v3.0)
 // @namespace    local-pc-agent
-// @version      3.0
+// @version      3.1
 // @description  Bridges Gemini chat tool calls to a local, token-protected PC agent.
 // @match        https://gemini.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -24,7 +24,13 @@
     get_pc_stats: [],
     list_files: ["directory"],
     read_file: ["filename"],
-    write_file: ["filename", "content"]
+    write_file: ["filename", "content"],
+    search_files: ["query", "directory", "search_content"],
+    create_directory: ["directory"],
+    move_file: ["source", "destination"],
+    get_file_info: ["filename"],
+    preview_file: ["filename"],
+    run_command: ["command", "purpose"]
   };
 
   const executedSignatures = new Set();
@@ -107,6 +113,16 @@
         typeof payload.args.filename !== "string") return null;
     if (payload.tool === "write_file" &&
         (typeof payload.args.filename !== "string" || typeof payload.args.content !== "string")) return null;
+    if (payload.tool === "search_files" &&
+        (typeof payload.args.query !== "string" ||
+         ("directory" in payload.args && typeof payload.args.directory !== "string") ||
+         ("search_content" in payload.args && typeof payload.args.search_content !== "boolean"))) return null;
+    if (payload.tool === "create_directory" && typeof payload.args.directory !== "string") return null;
+    if (payload.tool === "move_file" &&
+        (typeof payload.args.source !== "string" || typeof payload.args.destination !== "string")) return null;
+    if (["get_file_info", "preview_file"].includes(payload.tool) && typeof payload.args.filename !== "string") return null;
+    if (payload.tool === "run_command" &&
+        (typeof payload.args.command !== "string" || typeof payload.args.purpose !== "string")) return null;
 
     return payload;
   }
@@ -138,7 +154,7 @@
       if (!hasImmediateTrigger(block, rawText)) continue;
 
       // Auto mode is deliberately limited to read-only tools.
-      if (isAutoMode && payload.tool === "write_file") continue;
+      if (isAutoMode && !["get_pc_stats", "list_files", "read_file", "search_files", "get_file_info", "preview_file"].includes(payload.tool)) continue;
 
       return { payload, element: block, rawText };
     }
@@ -194,7 +210,47 @@
     }
   }
 
-  function executeToolCall(target) {
+  function approveCommand(command, purpose) {
+    return new Promise(resolve => {
+      const overlay = document.createElement("div");
+      overlay.style.cssText = "position:fixed;inset:0;z-index:1000001;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;padding:20px;";
+      const dialog = document.createElement("div");
+      dialog.style.cssText = "background:#1e1e2e;color:#cdd6f4;padding:20px;border-radius:10px;width:min(620px,95vw);font:14px sans-serif;box-shadow:0 8px 32px #000;";
+      const heading = document.createElement("h2");
+      heading.textContent = "Approve shell command?";
+      heading.style.cssText = "margin:0 0 12px;font-size:18px;";
+      const details = document.createElement("p");
+      details.textContent = "Purpose: " + purpose;
+      details.style.cssText = "white-space:pre-wrap;overflow-wrap:anywhere;";
+      const field = document.createElement("textarea");
+      field.readOnly = true;
+      field.value = command;
+      field.setAttribute("aria-label", "Exact command to execute");
+      field.style.cssText = "box-sizing:border-box;width:100%;min-height:110px;background:#11111b;color:#f9e2af;border:1px solid #585b70;border-radius:6px;padding:10px;font:13px monospace;resize:vertical;";
+      const note = document.createElement("p");
+      note.textContent = "This runs with your Windows account's permissions. Review the full command before approving.";
+      note.style.cssText = "color:#f38ba8;font-size:12px;";
+      const buttons = document.createElement("div");
+      buttons.style.cssText = "display:flex;justify-content:flex-end;gap:8px;margin-top:14px;";
+      const reject = document.createElement("button");
+      reject.textContent = "Reject";
+      const accept = document.createElement("button");
+      accept.textContent = "Accept and run";
+      accept.style.cssText = "background:#a6e3a1;color:#11111b;font-weight:bold;";
+      for (const button of [reject, accept]) button.style.cssText += "border:0;border-radius:5px;padding:9px 14px;cursor:pointer;";
+      function finish(approved) { overlay.remove(); resolve(approved); }
+      reject.addEventListener("click", () => finish(false));
+      accept.addEventListener("click", () => finish(true));
+      overlay.addEventListener("click", event => { if (event.target === overlay) finish(false); });
+      dialog.append(heading, details, field, note, buttons);
+      buttons.append(reject, accept);
+      overlay.appendChild(dialog);
+      document.body.appendChild(overlay);
+      field.focus();
+    });
+  }
+
+  async function executeToolCall(target) {
     if (typeof GM_xmlhttpRequest !== "function") {
       statusEl.textContent = "Error: Tampermonkey GM_xmlhttpRequest is unavailable.";
       return;
@@ -204,17 +260,23 @@
       return;
     }
 
-    // A write is never automatically executed. Clicking the button is explicit
-    // consent, and this additional confirmation protects against accidental clicks.
-    if (target.payload.tool === "write_file") {
-      const filename = target.payload.args.filename;
-      if (!window.confirm(`Allow the local agent to write this file?\n\n${filename}`)) {
-        statusEl.textContent = "Write cancelled by user.";
+    pendingSignatures.add(target.rawText);
+    if (target.payload.tool === "run_command") {
+      const approved = await approveCommand(target.payload.args.command, target.payload.args.purpose);
+      if (!approved) {
+        pendingSignatures.delete(target.rawText);
+        statusEl.textContent = "Command rejected; nothing was run.";
+        return;
+      }
+    } else if (["write_file", "create_directory", "move_file"].includes(target.payload.tool)) {
+      const summary = target.payload.tool === "write_file" ? target.payload.args.filename :
+        target.payload.tool === "move_file" ? `${target.payload.args.source} → ${target.payload.args.destination}` : target.payload.args.directory;
+      if (!window.confirm(`Allow ${target.payload.tool.replaceAll("_", " ")}?\n\n${summary}`)) {
+        pendingSignatures.delete(target.rawText);
+        statusEl.textContent = "Action cancelled by user.";
         return;
       }
     }
-
-    pendingSignatures.add(target.rawText);
     statusEl.textContent = "Running " + target.payload.tool + "...";
 
     GM_xmlhttpRequest({

@@ -10,7 +10,9 @@ Security notes:
 import hmac
 import os
 import platform
+import subprocess
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +30,9 @@ WORKSPACE_DIR = Path(
 MAX_READ_BYTES = 1_000_000
 MAX_WRITE_BYTES = 1_000_000
 MAX_LIST_ENTRIES = 500
+MAX_SEARCH_FILES = 2000
+MAX_SEARCH_MATCHES = 100
+MAX_COMMAND_OUTPUT = 8000
 
 
 def _auth_token() -> str:
@@ -202,11 +207,142 @@ def tool_write_file(args: dict) -> dict:
     }
 
 
+def tool_search_files(args: dict) -> dict:
+    query = args.get("query")
+    directory = args.get("directory", ".")
+    search_content = args.get("search_content", False)
+    if not isinstance(query, str) or not query:
+        raise ValueError("'query' must be a non-empty string.")
+    if len(query) > 500:
+        raise ValueError("'query' must be 500 characters or fewer.")
+    if not isinstance(directory, str) or not isinstance(search_content, bool):
+        raise ValueError("'directory' must be text and 'search_content' must be a boolean.")
+    root = safe_path(directory)
+    if not root.is_dir():
+        raise ValueError("Directory does not exist.")
+
+    matches = []
+    scanned = 0
+    truncated = False
+    for current, dirs, files in os.walk(root, followlinks=False):
+        dirs[:] = [name for name in dirs if (Path(current) / name).resolve().is_relative_to(WORKSPACE_DIR)]
+        for name in files:
+            path = Path(current) / name
+            try:
+                path.resolve().relative_to(WORKSPACE_DIR)
+            except (OSError, ValueError):
+                continue
+            scanned += 1
+            if scanned > MAX_SEARCH_FILES:
+                truncated = True
+                break
+            rel = str(path.relative_to(WORKSPACE_DIR))
+            matched = query.casefold() in name.casefold()
+            excerpt = None
+            if search_content and not matched:
+                try:
+                    if path.stat().st_size <= MAX_READ_BYTES:
+                        content = path.read_text(encoding="utf-8")
+                        index = content.casefold().find(query.casefold())
+                        if index >= 0:
+                            excerpt = content[max(0, index - 80):index + len(query) + 160]
+                            matched = True
+                except (OSError, UnicodeError):
+                    pass
+            if matched:
+                matches.append({"filename": rel, "excerpt": excerpt})
+                if len(matches) >= MAX_SEARCH_MATCHES:
+                    truncated = True
+                    break
+        if truncated:
+            break
+    return {"query": query, "matches": matches, "truncated": truncated}
+
+
+def tool_create_directory(args: dict) -> dict:
+    directory = args.get("directory")
+    target = safe_path(directory)
+    target.mkdir(parents=True, exist_ok=True)
+    return {"success": True, "directory": str(target.relative_to(WORKSPACE_DIR)) or "."}
+
+
+def tool_move_file(args: dict) -> dict:
+    source = safe_path(args.get("source"))
+    destination = safe_path(args.get("destination"))
+    if not source.is_file():
+        raise FileNotFoundError("File not found.")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    # Resolve again after creating the parent to keep destination inside workspace.
+    parent = destination.parent.resolve()
+    try:
+        parent.relative_to(WORKSPACE_DIR)
+        source.resolve().relative_to(WORKSPACE_DIR)
+    except ValueError:
+        raise PermissionError("Access outside the workspace is blocked.") from None
+    destination = parent / destination.name
+    if destination.exists():
+        raise ValueError("Destination already exists; refusing to overwrite it.")
+    source.replace(destination)
+    return {"success": True, "source": str(source.relative_to(WORKSPACE_DIR)),
+            "destination": str(destination.relative_to(WORKSPACE_DIR))}
+
+
+def tool_get_file_info(args: dict) -> dict:
+    target = safe_path(args.get("filename"))
+    if not target.is_file():
+        raise FileNotFoundError("File not found.")
+    info = target.stat()
+    return {"filename": str(target.relative_to(WORKSPACE_DIR)), "size_bytes": info.st_size,
+            "modified": datetime.fromtimestamp(info.st_mtime).astimezone().isoformat()}
+
+
+def tool_preview_file(args: dict) -> dict:
+    target = safe_path(args.get("filename"))
+    if not target.is_file():
+        raise FileNotFoundError("File not found.")
+    if target.stat().st_size > MAX_READ_BYTES:
+        raise ValueError(f"File exceeds the {MAX_READ_BYTES}-byte preview limit.")
+    with target.open("r", encoding="utf-8") as file:
+        content = file.read(1000)
+    return {"filename": str(target.relative_to(WORKSPACE_DIR)), "preview": content,
+            "truncated": target.stat().st_size > len(content.encode("utf-8"))}
+
+
+def tool_run_command(args: dict) -> dict:
+    command = args.get("command")
+    purpose = args.get("purpose")
+    if not isinstance(command, str) or not command.strip() or len(command) > 4000:
+        raise ValueError("'command' must contain 1 to 4000 characters.")
+    if not isinstance(purpose, str) or not purpose.strip() or len(purpose) > 500:
+        raise ValueError("'purpose' must contain 1 to 500 characters.")
+    try:
+        with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+            completed = subprocess.run(command, shell=True, cwd=WORKSPACE_DIR, stdout=stdout,
+                                       stderr=stderr, timeout=15)
+            stdout.seek(0)
+            stderr.seek(0)
+            output = stdout.read(MAX_COMMAND_OUTPUT + 1)
+            errors = stderr.read(MAX_COMMAND_OUTPUT + 1)
+        return {"return_code": completed.returncode,
+                "stdout": output[:MAX_COMMAND_OUTPUT].decode("utf-8", errors="replace"),
+                "stderr": errors[:MAX_COMMAND_OUTPUT].decode("utf-8", errors="replace"),
+                "output_truncated": len(output) > MAX_COMMAND_OUTPUT or len(errors) > MAX_COMMAND_OUTPUT,
+                "purpose": purpose}
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError("Command exceeded the 15-second time limit.") from exc
+
+
 TOOLS = {
     "get_pc_stats": (tool_get_pc_stats, set()),
     "list_files": (tool_list_files, {"directory"}),
     "read_file": (tool_read_file, {"filename"}),
     "write_file": (tool_write_file, {"filename", "content"}),
+    "search_files": (tool_search_files, {"query", "directory", "search_content"}),
+    "create_directory": (tool_create_directory, {"directory"}),
+    "move_file": (tool_move_file, {"source", "destination"}),
+    "get_file_info": (tool_get_file_info, {"filename"}),
+    "preview_file": (tool_preview_file, {"filename"}),
+    "run_command": (tool_run_command, {"command", "purpose"}),
 }
 
 

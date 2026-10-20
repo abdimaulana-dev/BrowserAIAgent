@@ -2,7 +2,7 @@
 
 A small, experimental bridge between **Gemini in your browser** and a **local Python server on Windows**. A Tampermonkey userscript detects explicitly marked JSON tool calls in a Gemini response and sends them to the local server. The server exposes a small allowlist of tools for PC stats and file operations inside one workspace directory.
 
-> **Status:** Prototype. Review the code before running it. This is not a standards-compliant MCP server, and it does not provide general mouse, keyboard, shell, or application control.
+> **Status:** Prototype. Review the code before running it. This is not a standards-compliant MCP server and does not provide general mouse, keyboard, or application control. It can run shell commands after explicit browser approval.
 
 ## Features
 
@@ -10,8 +10,8 @@ A small, experimental bridge between **Gemini in your browser** and a **local Py
 - Local Flask server bound to `127.0.0.1:5050`
 - Shared-token request authentication
 - File operations restricted to a configured workspace
-- Tools: `get_pc_stats`, `list_files`, `read_file`, `write_file`
-- Manual execution by default; writes require confirmation
+- Tools for PC stats, workspace search and file operations, plus user-approved shell commands
+- Manual execution by default; changes and shell commands require confirmation
 - Optional auto-execution for read-only tools
 
 ## Project layout
@@ -106,13 +106,22 @@ For `read_file`, `filename` must be a path relative to the workspace. For `write
 | `list_files` | `{"directory":"."}` | Lists entries within the workspace |
 | `read_file` | `{"filename":"notes.txt"}` | Reads a UTF-8 text file, up to the configured limit |
 | `write_file` | `{"filename":"test.txt","content":"hello"}` | Writes UTF-8 text inside the workspace |
+| `search_files` | `{"query":"TODO","directory":".","search_content":true}` | Searches names, and optionally text in small UTF-8 files |
+| `create_directory` | `{"directory":"reports/2026"}` | Creates a workspace folder |
+| `move_file` | `{"source":"draft.txt","destination":"archive/draft.txt"}` | Moves or renames a file without overwriting |
+| `get_file_info` | `{"filename":"notes.txt"}` | Returns size and modified time |
+| `preview_file` | `{"filename":"notes.txt"}` | Returns a short text preview |
+| `run_command` | `{"command":"Get-ChildItem","purpose":"List workspace files"}` | Shows an approval dialog with the exact command and purpose before running it in the workspace |
+
+Shell commands run with your Windows account's permissions and can affect files or settings outside the workspace. The browser approval dialog is an important safeguard, but it is not an OS security boundary. Only approve commands you understand. Shell commands cannot be auto-executed.
 
 ## Limitations
 
 - Only Gemini is matched by the userscript.
 - This is a custom HTTP tool bridge, not the formal Model Context Protocol.
-- It does not currently control the mouse, keyboard, shell, or arbitrary applications.
+- It does not currently control the mouse, keyboard, or arbitrary applications.
 - The userscript's response parsing depends on Gemini's page structure and may need maintenance if the site changes.
 - This is a prototype; the path checks reduce traversal risks but are not a substitute for OS-level isolation.
+- Shell commands run as your Windows user. Approval is required in the browser, but commands are not sandboxed to the workspace.
 
 See [`docs/SECURITY.md`](docs/SECURITY.md) before using it with important files.

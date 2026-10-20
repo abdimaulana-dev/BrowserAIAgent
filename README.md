@@ -66,6 +66,8 @@ The generated script contains the same token as `.env`. Both files are ignored b
 
 ## 3. Test the connection
 
+For a reusable prompt with all current tools and the security rules, copy [`docs/INITIAL_PROMPT.md`](docs/INITIAL_PROMPT.md) into Gemini.
+
 Open `http://127.0.0.1:5050/health` in your browser. Expected response:
 
 ```json

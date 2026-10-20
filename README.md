@@ -11,7 +11,7 @@ A small, experimental bridge between **Gemini in your browser** and a **local Py
 - Shared-token request authentication
 - File operations restricted to a configured workspace
 - Tools for PC stats, workspace search and file operations, plus user-approved shell commands
-- Manual execution by default; changes and shell commands require confirmation
+- Manual execution by default; shell commands show a review dialog before running
 - Optional auto-execution for read-only tools
 
 ## Project layout
@@ -98,7 +98,7 @@ For file listing, use:
 ```
 exect
 
-For `read_file`, `filename` must be a path relative to the workspace. For `write_file`, use a harmless test filename first. The script asks for confirmation before writing.
+For `read_file`, `filename` must be a path relative to the workspace. Tool calls that change files run only when you click **Execute Last JSON Tool**. Shell commands also show a dialog with the exact command and purpose before running.
 
 ## Available tools
 

@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Browser Chat PC Agent Harness (v3.0)
+// @name         Browser Chat PC Agent Harness (v3.1)
 // @namespace    local-pc-agent
 // @version      3.1
 // @description  Bridges Gemini chat tool calls to a local, token-protected PC agent.
@@ -34,6 +34,7 @@
   };
 
   const executedSignatures = new Set();
+  const autoAttemptedSignatures = new Set();
   const pendingSignatures = new Set();
 
   const oldPanel = document.getElementById("mcp-harness-panel");
@@ -45,7 +46,7 @@
     "position:fixed;bottom:20px;right:20px;z-index:999999;background:#1e1e2e;color:#cdd6f4;padding:12px;border-radius:10px;font-family:monospace;box-shadow:0 4px 12px rgba(0,0,0,.5);width:280px;";
 
   const title = document.createElement("div");
-  title.textContent = "Local PC Agent Harness v3.0";
+  title.textContent = "Local PC Agent Harness v3.1";
   title.style.cssText = "font-weight:bold;margin-bottom:8px;font-size:13px;";
 
   const runBtn = document.createElement("button");
@@ -147,16 +148,17 @@
       const block = blocks[i];
       const rawText = (block.innerText || block.textContent || "").trim();
       if (!rawText.startsWith("{") || !rawText.includes('"mcp_call"')) continue;
-      if (executedSignatures.has(rawText) || pendingSignatures.has(rawText)) continue;
-
       const payload = parseAndValidateToolCall(rawText);
       if (!payload) continue;
       if (!hasImmediateTrigger(block, rawText)) continue;
+      const signature = JSON.stringify([payload.tool, Object.entries(payload.args).sort(([a], [b]) => a.localeCompare(b))]);
+      if (executedSignatures.has(signature) || pendingSignatures.has(signature) ||
+          (isAutoMode && autoAttemptedSignatures.has(signature))) continue;
 
       // Auto mode is deliberately limited to read-only tools.
       if (isAutoMode && !["get_pc_stats", "list_files", "read_file", "search_files", "get_file_info", "preview_file"].includes(payload.tool)) continue;
 
-      return { payload, element: block, rawText };
+      return { payload, element: block, rawText, signature };
     }
     return null;
   }
@@ -260,20 +262,12 @@
       return;
     }
 
-    pendingSignatures.add(target.rawText);
+    pendingSignatures.add(target.signature);
     if (target.payload.tool === "run_command") {
       const approved = await approveCommand(target.payload.args.command, target.payload.args.purpose);
       if (!approved) {
-        pendingSignatures.delete(target.rawText);
+        pendingSignatures.delete(target.signature);
         statusEl.textContent = "Command rejected; nothing was run.";
-        return;
-      }
-    } else if (["write_file", "create_directory", "move_file"].includes(target.payload.tool)) {
-      const summary = target.payload.tool === "write_file" ? target.payload.args.filename :
-        target.payload.tool === "move_file" ? `${target.payload.args.source} → ${target.payload.args.destination}` : target.payload.args.directory;
-      if (!window.confirm(`Allow ${target.payload.tool.replaceAll("_", " ")}?\n\n${summary}`)) {
-        pendingSignatures.delete(target.rawText);
-        statusEl.textContent = "Action cancelled by user.";
         return;
       }
     }
@@ -289,7 +283,7 @@
       data: JSON.stringify(target.payload),
       timeout: REQUEST_TIMEOUT_MS,
       onload(response) {
-        pendingSignatures.delete(target.rawText);
+        pendingSignatures.delete(target.signature);
         let data;
         try {
           data = JSON.parse(response.responseText);
@@ -299,7 +293,7 @@
         }
 
         if (response.status >= 200 && response.status < 300 && data.status === "success") {
-          executedSignatures.add(target.rawText);
+          executedSignatures.add(target.signature);
           target.element.setAttribute("data-mcp-executed", "true");
           statusEl.textContent = "Completed: " + target.payload.tool;
         } else {
@@ -311,11 +305,11 @@
         insertIntoChat(formattedReply);
       },
       ontimeout() {
-        pendingSignatures.delete(target.rawText);
+        pendingSignatures.delete(target.signature);
         statusEl.textContent = "Timed out. Check the server before retrying to avoid repeating an action.";
       },
       onerror() {
-        pendingSignatures.delete(target.rawText);
+        pendingSignatures.delete(target.signature);
         statusEl.textContent = "Connection failed. Check that the local server is running.";
       }
     });
@@ -333,6 +327,9 @@
   setInterval(() => {
     if (!autoExecToggle.checked) return;
     const target = findLatestUnexecutedToolCall(true);
-    if (target) executeToolCall(target);
+    if (target) {
+      autoAttemptedSignatures.add(target.signature);
+      executeToolCall(target);
+    }
   }, 2000);
 })();

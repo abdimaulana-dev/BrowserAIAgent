@@ -33,7 +33,7 @@ MAX_LIST_ENTRIES = 500
 MAX_SEARCH_FILES = 2000
 MAX_SEARCH_MATCHES = 100
 MAX_COMMAND_OUTPUT = 8000
-COMMAND_TIMEOUT_SECONDS = 60
+MAX_COMMAND_WAIT_SECONDS = 300
 
 
 def _auth_token() -> str:
@@ -208,6 +208,45 @@ def tool_write_file(args: dict) -> dict:
     }
 
 
+def tool_edit_file(args: dict) -> dict:
+    filename = args.get("filename")
+    old_text = args.get("old_text")
+    new_text = args.get("new_text")
+    if not isinstance(old_text, str) or not old_text:
+        raise ValueError("'old_text' must be a non-empty string.")
+    if not isinstance(new_text, str):
+        raise ValueError("'new_text' must be a string.")
+
+    target = safe_path(filename)
+    if not target.is_file():
+        raise FileNotFoundError("File not found.")
+    if target.stat().st_size > MAX_READ_BYTES:
+        raise ValueError(f"File exceeds the {MAX_READ_BYTES}-byte edit limit.")
+
+    target = target.resolve()
+    try:
+        target.relative_to(WORKSPACE_DIR)
+    except ValueError:
+        raise PermissionError("Access outside the workspace is blocked.") from None
+
+    try:
+        with target.open("rb") as file:
+            original_bytes = file.read(MAX_READ_BYTES + 1)
+        if len(original_bytes) > MAX_READ_BYTES:
+            raise ValueError(f"File exceeds the {MAX_READ_BYTES}-byte edit limit.")
+        original = original_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("Only UTF-8 text files can be edited.") from exc
+
+    occurrences = original.count(old_text)
+    if occurrences != 1:
+        raise ValueError(f"'old_text' must match exactly once; found {occurrences} matches. No changes were made.")
+
+    result = tool_write_file({"filename": filename, "content": original.replace(old_text, new_text, 1)})
+    result["replacements"] = 1
+    return result
+
+
 def tool_search_files(args: dict) -> dict:
     query = args.get("query")
     directory = args.get("directory", ".")
@@ -312,14 +351,31 @@ def tool_preview_file(args: dict) -> dict:
 def tool_run_command(args: dict) -> dict:
     command = args.get("command")
     purpose = args.get("purpose")
+    seconds = args.get("seconds", 15)
+    wait_until_completed = args.get("wait_until_completed", False)
     if not isinstance(command, str) or not command.strip() or len(command) > 4000:
         raise ValueError("'command' must contain 1 to 4000 characters.")
     if not isinstance(purpose, str) or not purpose.strip() or len(purpose) > 500:
         raise ValueError("'purpose' must contain 1 to 500 characters.")
+    if isinstance(seconds, bool) or not isinstance(seconds, int) or not 1 <= seconds <= MAX_COMMAND_WAIT_SECONDS:
+        raise ValueError(f"'seconds' must be an integer from 1 to {MAX_COMMAND_WAIT_SECONDS}.")
+    if not isinstance(wait_until_completed, bool):
+        raise ValueError("'wait_until_completed' must be a boolean.")
+
+    if not wait_until_completed:
+        try:
+            process = subprocess.Popen(command, shell=True, cwd=WORKSPACE_DIR,
+                                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL)
+        except OSError as exc:
+            raise ValueError(f"Could not start command: {exc}") from exc
+        return {"started": True, "pid": process.pid, "waited": False,
+                "purpose": purpose, "message": "Command started; completion and output were not awaited."}
+
     try:
         with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
             completed = subprocess.run(command, shell=True, cwd=WORKSPACE_DIR, stdout=stdout,
-                                       stderr=stderr, timeout=COMMAND_TIMEOUT_SECONDS)
+                                       stderr=stderr, timeout=seconds)
             stdout.seek(0)
             stderr.seek(0)
             output = stdout.read(MAX_COMMAND_OUTPUT + 1)
@@ -328,9 +384,9 @@ def tool_run_command(args: dict) -> dict:
                 "stdout": output[:MAX_COMMAND_OUTPUT].decode("utf-8", errors="replace"),
                 "stderr": errors[:MAX_COMMAND_OUTPUT].decode("utf-8", errors="replace"),
                 "output_truncated": len(output) > MAX_COMMAND_OUTPUT or len(errors) > MAX_COMMAND_OUTPUT,
-                "purpose": purpose}
+                "purpose": purpose, "waited": True}
     except subprocess.TimeoutExpired as exc:
-        raise ValueError(f"Command exceeded the {COMMAND_TIMEOUT_SECONDS}-second time limit.") from exc
+        raise ValueError(f"Command did not complete within the requested {seconds}-second wait.") from exc
 
 
 TOOLS = {
@@ -338,12 +394,13 @@ TOOLS = {
     "list_files": (tool_list_files, {"directory"}),
     "read_file": (tool_read_file, {"filename"}),
     "write_file": (tool_write_file, {"filename", "content"}),
+    "edit_file": (tool_edit_file, {"filename", "old_text", "new_text"}),
     "search_files": (tool_search_files, {"query", "directory", "search_content"}),
     "create_directory": (tool_create_directory, {"directory"}),
     "move_file": (tool_move_file, {"source", "destination"}),
     "get_file_info": (tool_get_file_info, {"filename"}),
     "preview_file": (tool_preview_file, {"filename"}),
-    "run_command": (tool_run_command, {"command", "purpose"}),
+    "run_command": (tool_run_command, {"command", "purpose", "seconds", "wait_until_completed"}),
 }
 
 

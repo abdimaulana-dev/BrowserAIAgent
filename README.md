@@ -60,7 +60,7 @@ Keep the PowerShell window open while using the bridge. To choose another worksp
 
 1. Open Tampermonkey and choose **Create a new script**.
 2. Open `.local\tampermonkey_harness.user.js`, copy its contents into the editor, and save.
-3. Reload Gemini. Enable **Auto-execute read-only tools** when you want read-only calls to run automatically after their `exect` marker. That toggle is off by default. **Auto-send reply in chat** controls ordinary tool replies; approved shell commands always send a running acknowledgement and then their final result to Gemini.
+3. Reload Gemini. **Auto-execute tools (confirm shell)** is off by default. When enabled, valid calls run after their `exect` marker, including file changes. Shell commands always open an approval dialog and run only after you accept. With auto-execute off, file changes require **Execute Last JSON Tool**. **Auto-send reply in chat** controls ordinary tool replies; approved shell commands send a running acknowledgement and then their final result to Gemini.
 
 The generated script contains the same token as `.env`. Both files are ignored by Git. Keep them private; this token is a basic local guard rather than a strong security boundary against other software running as your Windows user.
 
@@ -98,7 +98,7 @@ For file listing, use:
 ```
 exect
 
-For `read_file`, `filename` must be a path relative to the workspace. Tool calls that change files run only when you click **Execute Last JSON Tool**. Shell commands also show a dialog with the exact command and purpose before running.
+For `read_file`, `filename` must be a path relative to the workspace. With auto-execute off, tool calls that change files run only when you click **Execute Last JSON Tool**. A valid `run_command` call with its `exect` marker opens the shell approval dialog when auto-execute is off.
 
 ## Available tools
 
@@ -108,14 +108,15 @@ For `read_file`, `filename` must be a path relative to the workspace. Tool calls
 | `list_files` | `{"directory":"."}` | Lists entries within the workspace |
 | `read_file` | `{"filename":"notes.txt"}` | Reads a UTF-8 text file, up to the configured limit |
 | `write_file` | `{"filename":"test.txt","content":"hello"}` | Writes UTF-8 text inside the workspace |
+| `edit_file` | `{"filename":"app.py","old_text":"old line","new_text":"new line"}` | Replaces one unique exact text match in a UTF-8 text file |
 | `search_files` | `{"query":"TODO","directory":".","search_content":true}` | Searches names, and optionally text in small UTF-8 files |
 | `create_directory` | `{"directory":"reports/2026"}` | Creates a workspace folder |
 | `move_file` | `{"source":"draft.txt","destination":"archive/draft.txt"}` | Moves or renames a file without overwriting |
 | `get_file_info` | `{"filename":"notes.txt"}` | Returns size and modified time |
 | `preview_file` | `{"filename":"notes.txt"}` | Returns a short text preview |
-| `run_command` | `{"command":"Get-ChildItem","purpose":"List workspace files"}` | Shows an approval dialog, immediately reports approval to Gemini, waits up to 60 seconds, then sends the command result |
+| `run_command` | `{"command":"Get-ChildItem","purpose":"List workspace files","seconds":15,"wait_until_completed":true}` | Always opens an approval dialog. `seconds` defaults to 15 (maximum 300). `wait_until_completed` defaults to false (returns PID after launch); set true to wait up to `seconds` and receive output |
 
-Shell commands run with your Windows account's permissions and can affect files or settings outside the workspace. The browser approval dialog is an important safeguard, but it is not an OS security boundary. Only approve commands you understand. Shell commands cannot be auto-executed.
+Shell commands run using your Windows account's permissions and can affect files or settings outside the workspace. They always require approval in the browser, even when auto-execute is on.
 
 ## Limitations
 

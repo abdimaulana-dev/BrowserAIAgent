@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Browser Chat PC Agent Harness (v4.2)
+// @name         Browser Chat PC Agent Harness (v5.0)
 // @namespace    local-pc-agent
-// @version      4.2
+// @version      5.0
 // @description  Bridges Gemini tool calls to a token-protected local PC agent.
 // @match        https://gemini.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -21,12 +21,13 @@
     list_files: ["directory"],
     read_file: ["filename"],
     write_file: ["filename", "content"],
+    edit_file: ["filename", "old_text", "new_text"],
     search_files: ["query", "directory", "search_content"],
     create_directory: ["directory"],
     move_file: ["source", "destination"],
     get_file_info: ["filename"],
     preview_file: ["filename"],
-    run_command: ["command", "purpose"]
+    run_command: ["command", "purpose", "seconds", "wait_until_completed"]
   };
 
   const executedSignatures = new Set();
@@ -41,7 +42,7 @@
   panel.style.cssText = "position:fixed;bottom:20px;right:20px;z-index:999999;background:#1e1e2e;color:#cdd6f4;padding:12px;border-radius:10px;font-family:monospace;box-shadow:0 4px 12px rgba(0,0,0,.5);width:280px;";
 
   const title = document.createElement("div");
-  title.textContent = "Local PC Agent Harness v4.2";
+  title.textContent = "Local PC Agent Harness v5.0";
   title.style.cssText = "font-weight:bold;margin-bottom:8px;font-size:13px;";
 
   const runButton = document.createElement("button");
@@ -57,7 +58,7 @@
   autoExecuteToggle.type = "checkbox";
   autoExecuteToggle.style.cssText = "margin-right:6px;";
   autoExecuteToggle.checked = localStorage.getItem("mcp_auto_exec") === "true";
-  autoExecuteLabel.append(autoExecuteToggle, document.createTextNode("Auto-execute read-only tools"));
+  autoExecuteLabel.append(autoExecuteToggle, document.createTextNode("Auto-execute tools (confirm shell)"));
 
   const autoSendLabel = document.createElement("label");
   autoSendLabel.style.cssText = "font-size:12px;cursor:pointer;display:flex;align-items:center;";
@@ -77,7 +78,7 @@
   autoExecuteToggle.addEventListener("change", () => {
     localStorage.setItem("mcp_auto_exec", String(autoExecuteToggle.checked));
     status.textContent = autoExecuteToggle.checked
-      ? "Auto-execute enabled for read-only tools."
+      ? "Auto-execute enabled; shell commands still need approval."
       : "Auto-execute disabled; use the button to run tools.";
   });
   autoSendToggle.addEventListener("change", () => {
@@ -85,9 +86,14 @@
   });
 
   function parseToolCall(text) {
+    // Gemini may include the fenced-block language label in the code element.
+    // Strip only a standalone leading JSON label; keep the payload strict JSON.
+    const normalizedText = String(text)
+      .replace(/^\s*json\s*(?:\r?\n|$)/i, "")
+      .trim();
     let payload;
     try {
-      payload = JSON.parse(text);
+      payload = JSON.parse(normalizedText);
     } catch {
       return null;
     }
@@ -103,25 +109,77 @@
     if (payload.tool === "list_files" && "directory" in args && typeof args.directory !== "string") return null;
     if (["read_file", "get_file_info", "preview_file"].includes(payload.tool) && typeof args.filename !== "string") return null;
     if (payload.tool === "write_file" && (typeof args.filename !== "string" || typeof args.content !== "string")) return null;
+    if (payload.tool === "edit_file" &&
+        (typeof args.filename !== "string" || typeof args.old_text !== "string" || !args.old_text ||
+         typeof args.new_text !== "string")) return null;
     if (payload.tool === "search_files" &&
         (typeof args.query !== "string" ||
          ("directory" in args && typeof args.directory !== "string") ||
          ("search_content" in args && typeof args.search_content !== "boolean"))) return null;
     if (payload.tool === "create_directory" && typeof args.directory !== "string") return null;
     if (payload.tool === "move_file" && (typeof args.source !== "string" || typeof args.destination !== "string")) return null;
-    if (payload.tool === "run_command" && (typeof args.command !== "string" || typeof args.purpose !== "string")) return null;
+    if (payload.tool === "run_command" &&
+        (typeof args.command !== "string" || typeof args.purpose !== "string" ||
+         ("seconds" in args && (!Number.isInteger(args.seconds) || args.seconds < 1 || args.seconds > 300)) ||
+         ("wait_until_completed" in args && typeof args.wait_until_completed !== "boolean"))) return null;
     return payload;
   }
 
-  function triggerContext(block, blockText) {
-    const normalizedBlockText = blockText.replace(/\s+/g, " ").trim();
-    let parent = block.parentElement;
-    for (let depth = 0; parent && depth < 15; depth++, parent = parent.parentElement) {
-      const text = (parent.innerText || parent.textContent || "").replace(/\s+/g, " ");
-      const index = text.lastIndexOf(normalizedBlockText);
-      if (index < 0) continue;
-      const followingText = text.slice(index + normalizedBlockText.length).replace(/copy\s*code/gi, "");
-      if (new RegExp("^\\s*" + TRIGGER_WORD + "(?:\\s|$)", "i").test(followingText)) return text;
+  function parentAcrossShadow(node) {
+    if (node.parentElement) return node.parentElement;
+    return node.getRootNode?.().host || null;
+  }
+
+  function queryAllIncludingOpenShadow(selector, root = document) {
+    const matches = Array.from(root.querySelectorAll(selector));
+    for (const element of root.querySelectorAll("*")) {
+      if (element.shadowRoot) matches.push(...queryAllIncludingOpenShadow(selector, element.shadowRoot));
+    }
+    return matches;
+  }
+
+  function triggerContext(block) {
+    let current = block;
+    for (let depth = 0; current && depth < 15; depth++, current = parentAcrossShadow(current)) {
+      for (let sibling = current.nextSibling; sibling; sibling = sibling.nextSibling) {
+        if (sibling.nodeType === Node.ELEMENT_NODE &&
+            sibling.matches("button,[role=button],[aria-label],[aria-hidden=true],svg")) continue;
+        const followingText = (sibling.nodeType === Node.TEXT_NODE
+          ? sibling.nodeValue
+          : (sibling.innerText || sibling.textContent || ""))
+          .replace(/copy\s*code/gi, "")
+          .replace(/[\u200B-\u200D\uFEFF]/g, "")
+          .trim();
+        if (!followingText) continue;
+        if (new RegExp("^" + TRIGGER_WORD + "(?:\\s|$)", "i").test(followingText)) {
+          const parent = parentAcrossShadow(current);
+          return (parent?.innerText || parent?.textContent || followingText).replace(/\s+/g, " ").trim();
+        }
+        // Gemini may put intervening presentation nodes between the code and
+        // trigger. Check the rendered text order after walking this ancestor.
+        break;
+      }
+    }
+
+    const normalizeDisplayText = value => String(value || "")
+      .replace(/[\u200B-\u200D\uFEFF]/g, "")
+      .replace(/copy\s*code/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const codeText = normalizeDisplayText(block.innerText || block.textContent || "")
+      .replace(/^json\s+(?=\{)/i, "");
+    if (!codeText) return "";
+
+    current = block;
+    for (let depth = 0; current && depth < 15; depth++, current = parentAcrossShadow(current)) {
+      const container = parentAcrossShadow(current);
+      const containerText = normalizeDisplayText(container?.innerText || container?.textContent || "");
+      const codeIndex = containerText.lastIndexOf(codeText);
+      if (codeIndex < 0) continue;
+      const afterCode = containerText.slice(codeIndex + codeText.length).trim();
+      if (new RegExp("^" + TRIGGER_WORD + "(?:\\s|$)", "i").test(afterCode)) {
+        return containerText;
+      }
     }
     return "";
   }
@@ -146,28 +204,91 @@
     }
   }
 
-  function findLatestToolCall(autoMode) {
-    const blocks = Array.from(document.querySelectorAll("pre, code"));
+  function findLatestToolCall(autoMode, onlyTool = null) {
+    const blocks = queryAllIncludingOpenShadow("pre, code");
     for (let index = blocks.length - 1; index >= 0; index--) {
       const block = blocks[index];
       const rawText = (block.innerText || block.textContent || "").trim();
-      if (!rawText.startsWith("{") || !rawText.includes('"mcp_call"')) continue;
+      const candidateText = rawText.replace(/^\s*json\s*(?:\r?\n|$)/i, "").trim();
+      if (!candidateText.startsWith("{") || !candidateText.includes('"mcp_call"')) continue;
       if (block.getAttribute("data-mcp-executed") === "true") continue;
 
-      const payload = parseToolCall(rawText);
-      const context = payload && triggerContext(block, rawText);
+      const payload = parseToolCall(candidateText);
+      if (onlyTool && payload?.tool !== onlyTool) continue;
+      const context = payload && triggerContext(block);
       if (!payload || !context) continue;
       const signature = signatureFor(payload);
       const callKey = callKeyFor(signature, context);
-      if (executedSignatures.has(signature) || pendingSignatures.has(signature)) continue;
+      if (executedSignatures.has(callKey) || pendingSignatures.has(callKey)) continue;
       if (wasHandledAcrossRefreshes(callKey)) continue;
-      if (autoMode && autoAttemptedSignatures.has(signature)) continue;
+      if (autoMode && autoAttemptedSignatures.has(callKey)) continue;
 
-      const readOnlyTools = ["get_pc_stats", "list_files", "read_file", "search_files", "get_file_info", "preview_file"];
-      if (autoMode && !readOnlyTools.includes(payload.tool)) continue;
       return { payload, element: block, rawText, signature, callKey };
     }
     return null;
+  }
+
+  function diagnoseLatestToolCall(onlyTool = null) {
+    const blocks = queryAllIncludingOpenShadow("pre, code");
+    if (!blocks.length) return "No code blocks found in the page. The response may not have rendered as a code block.";
+
+    let hasToolMarker = false;
+    let malformedJson = false;
+    let invalidCall = false;
+    let wrongTool = false;
+    let missingTrigger = false;
+    let alreadyHandled = false;
+
+    for (let index = blocks.length - 1; index >= 0; index--) {
+      const block = blocks[index];
+      const rawText = (block.innerText || block.textContent || "").trim();
+      const candidateText = rawText.replace(/^\s*json\s*(?:\r?\n|$)/i, "").trim();
+      if (!candidateText.startsWith("{") || !candidateText.includes('"mcp_call"')) continue;
+      hasToolMarker = true;
+
+      try {
+        JSON.parse(candidateText);
+      } catch (_) {
+        malformedJson = true;
+        continue;
+      }
+
+      const payload = parseToolCall(candidateText);
+      if (!payload) {
+        invalidCall = true;
+        continue;
+      }
+      if (onlyTool && payload.tool !== onlyTool) {
+        wrongTool = true;
+        continue;
+      }
+
+      const context = triggerContext(block);
+      if (!context) {
+        missingTrigger = true;
+        continue;
+      }
+
+      const signature = signatureFor(payload);
+      const callKey = callKeyFor(signature, context);
+      if (block.getAttribute("data-mcp-executed") === "true" ||
+          executedSignatures.has(callKey) || wasHandledAcrossRefreshes(callKey)) {
+        alreadyHandled = true;
+        continue;
+      }
+      if (pendingSignatures.has(callKey)) return "This valid tool call is already being processed; wait for its result.";
+      return "The call is valid and its trigger was found. If no approval dialog appeared, check the Tampermonkey script version and reload Gemini.";
+    }
+
+    if (!hasToolMarker) return "Code blocks were found, but none contains a JSON object with the \"mcp_call\" marker.";
+    if (missingTrigger) return 'A tool call passed validation, but a standalone "exect" trigger was not found after its code block.';
+    if (wrongTool) return onlyTool
+      ? 'A valid tool call was found, but it is not the expected tool "' + onlyTool + '".'
+      : "A valid tool call was found, but it could not be selected.";
+    if (invalidCall) return "The JSON parsed, but the call was rejected: check mcp_call:true, the allowed tool name, and that args contains only allowed fields with the expected types.";
+    if (malformedJson) return "A block contains the mcp_call marker, but its contents are not valid JSON. Remove any text inside the JSON object and check quotes and commas.";
+    if (alreadyHandled) return "This tool call was already handled. Change the call or resend it as a new message if you intend to run it again.";
+    return "No valid tool call could be selected. Check that the code block contains one JSON object.";
   }
 
   function insertIntoChat(responseText, forceSend = false) {
@@ -223,8 +344,9 @@
     }, 150));
   }
 
-  function approveCommand(command, purpose) {
+  function approveCommand(command, purpose, seconds, waitUntilCompleted) {
     return new Promise(resolve => {
+      status.textContent = "Review the shell command and choose Accept and run, Reject, or Reject silently.";
       const overlay = document.createElement("div");
       overlay.style.cssText = "position:fixed;inset:0;z-index:1000001;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;padding:20px;";
       const dialog = document.createElement("div");
@@ -235,6 +357,11 @@
       const purposeText = document.createElement("p");
       purposeText.textContent = "Purpose: " + purpose;
       purposeText.style.cssText = "white-space:pre-wrap;overflow-wrap:anywhere;";
+      const waitText = document.createElement("p");
+      waitText.textContent = waitUntilCompleted
+        ? "Wait for completion: up to " + seconds + " seconds."
+        : "Wait for completion: No; return after launch.";
+      waitText.style.cssText = "font-size:12px;color:#a6adc8;";
       const commandField = document.createElement("textarea");
       commandField.readOnly = true;
       commandField.value = command;
@@ -247,18 +374,22 @@
       buttons.style.cssText = "display:flex;justify-content:flex-end;gap:8px;margin-top:14px;";
       const rejectButton = document.createElement("button");
       rejectButton.textContent = "Reject";
+      const silentRejectButton = document.createElement("button");
+      silentRejectButton.textContent = "Reject silently";
       const acceptButton = document.createElement("button");
       acceptButton.textContent = "Accept and run";
       acceptButton.style.cssText = "background:#a6e3a1;color:#11111b;font-weight:bold;";
-      for (const button of [rejectButton, acceptButton]) {
+      silentRejectButton.title = "Do not run the command and do not send a rejection message to the AI.";
+      for (const button of [rejectButton, silentRejectButton, acceptButton]) {
         button.style.cssText += "border:0;border-radius:5px;padding:9px 14px;cursor:pointer;";
       }
-      const finish = approved => { overlay.remove(); resolve(approved); };
-      rejectButton.addEventListener("click", () => finish(false));
-      acceptButton.addEventListener("click", () => finish(true));
-      overlay.addEventListener("click", event => { if (event.target === overlay) finish(false); });
-      dialog.append(heading, purposeText, commandField, warning, buttons);
-      buttons.append(rejectButton, acceptButton);
+      const finish = choice => { overlay.remove(); resolve(choice); };
+      rejectButton.addEventListener("click", () => finish("reject"));
+      silentRejectButton.addEventListener("click", () => finish("silent"));
+      acceptButton.addEventListener("click", () => finish("accept"));
+      overlay.addEventListener("click", event => { if (event.target === overlay) finish("reject"); });
+      dialog.append(heading, purposeText, waitText, commandField, warning, buttons);
+      buttons.append(rejectButton, silentRejectButton, acceptButton);
       overlay.appendChild(dialog);
       document.body.appendChild(overlay);
       commandField.focus();
@@ -266,8 +397,8 @@
   }
 
   function finishCall(target) {
-    pendingSignatures.delete(target.signature);
-    executedSignatures.add(target.signature);
+    pendingSignatures.delete(target.callKey);
+    executedSignatures.add(target.callKey);
     target.element.setAttribute("data-mcp-executed", "true");
     try {
       sessionStorage.setItem(target.callKey, "true");
@@ -284,11 +415,18 @@
       return;
     }
 
-    pendingSignatures.add(target.signature);
+    pendingSignatures.add(target.callKey);
     if (target.payload.tool === "run_command") {
-      const approved = await approveCommand(target.payload.args.command, target.payload.args.purpose);
-      if (!approved) {
+      const seconds = target.payload.args.seconds ?? 15;
+      const waitUntilCompleted = target.payload.args.wait_until_completed ?? false;
+      const decision = await approveCommand(target.payload.args.command, target.payload.args.purpose,
+        seconds, waitUntilCompleted);
+      if (decision !== "accept") {
         finishCall(target);
+        if (decision === "silent") {
+          status.textContent = "Rejected silently. The command was not run, and no rejection message was sent to the AI.";
+          return;
+        }
         const rejection = {
           tool: "run_command",
           status: "error",
@@ -307,12 +445,18 @@
     finishCall(target);
     const isCommand = target.payload.tool === "run_command";
     if (isCommand) {
-      status.textContent = "Approved. Sending acknowledgement, then waiting up to 60 seconds for the command.";
+      const seconds = target.payload.args.seconds ?? 15;
+      const waitUntilCompleted = target.payload.args.wait_until_completed ?? false;
+      status.textContent = waitUntilCompleted
+        ? "Approved. Sending acknowledgement, then waiting up to " + seconds + " seconds."
+        : "Approved. Sending acknowledgement, then launching without waiting for completion.";
       const acknowledgement = {
         tool: "run_command",
         status: "running",
         result: {
-          message: "The user approved the command. It is running; wait for the final tool result before continuing.",
+          message: waitUntilCompleted
+            ? "The user approved the command. It is running; wait for the final result, which will arrive within the requested wait or time out."
+            : "The user approved the command. It is launching without waiting for completion; the final result confirms launch, not completion or output.",
           purpose: target.payload.args.purpose
         }
       };
@@ -328,7 +472,9 @@
         "X-MCP-Token": MCP_TOKEN
       },
       data: JSON.stringify(target.payload),
-      timeout: REQUEST_TIMEOUT_MS,
+      timeout: isCommand && (target.payload.args.wait_until_completed ?? false)
+        ? ((target.payload.args.seconds ?? 15) * 1000 + 5000)
+        : REQUEST_TIMEOUT_MS,
       onload(response) {
         let data;
         try {
@@ -346,7 +492,9 @@
           return;
         }
         status.textContent = response.status >= 200 && response.status < 300 && data.status === "success"
-          ? "Completed: " + target.payload.tool
+          ? (isCommand && !(target.payload.args.wait_until_completed ?? false)
+            ? "Started: run_command"
+            : "Completed: " + target.payload.tool)
           : "Tool failed (HTTP " + response.status + "): " + ((data.error && data.error.message) || data.error || "Unknown error");
         insertIntoChat("```json\n" + JSON.stringify(data, null, 2) + "\n```", isCommand);
       },
@@ -356,7 +504,7 @@
           const timeoutResult = {
             tool: "run_command",
             status: "error",
-            error: { code: "CLIENT_TIMEOUT", message: "No final command response arrived within 60 seconds." }
+            error: { code: "CLIENT_TIMEOUT", message: "No final command response arrived within the requested wait." }
           };
           insertIntoChat("```json\n" + JSON.stringify(timeoutResult, null, 2) + "\n```", true);
         }
@@ -378,17 +526,22 @@
   runButton.addEventListener("click", () => {
     const target = findLatestToolCall(false);
     if (!target) {
-      status.textContent = 'No unhandled valid tool call found with "exect" immediately after it.';
+      status.textContent = diagnoseLatestToolCall();
       return;
     }
     executeToolCall(target);
   });
 
   setInterval(() => {
+    const commandTarget = findLatestToolCall(false, "run_command");
+    if (commandTarget) {
+      executeToolCall(commandTarget);
+      return;
+    }
     if (!autoExecuteToggle.checked) return;
     const target = findLatestToolCall(true);
     if (!target) return;
-    autoAttemptedSignatures.add(target.signature);
+    autoAttemptedSignatures.add(target.callKey);
     executeToolCall(target);
   }, 2000);
 })();

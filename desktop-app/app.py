@@ -17,7 +17,7 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template, request
 
 ROOT = Path(__file__).resolve().parent
-APP_VERSION = "2.2.2"
+APP_VERSION = "2.2.3"
 
 
 def load_env_file():
@@ -170,10 +170,20 @@ def make_chat_title(text):
 def tool_call_from(text):
     pattern = re.compile(r"(?is)\x60{3}\s*json\s*(.*?)\s*\x60{3}\s*exect\b")
     match = pattern.search(text)
-    if not match:
-        return None
+    if match:
+        body = match.group(1)
+    else:
+        # Gemini's rendered response text drops Markdown fences but keeps the
+        # code-block language label, JSON body, and trailing execution marker.
+        label = re.search(r"(?im)^[ \t]*json[ \t]*$", text)
+        marker = re.search(r"(?m)^[ \t]*exect[ \t]*$", text)
+        if not label or not marker or marker.start() <= label.end():
+            return None
+        body = text[label.end():marker.start()].strip()
+        if not body.startswith("{"):
+            return None
     try:
-        payload = json.loads(match.group(1))
+        payload = json.loads(body)
     except json.JSONDecodeError:
         return None
     if not isinstance(payload, dict) or payload.get("mcp_call") is not True:

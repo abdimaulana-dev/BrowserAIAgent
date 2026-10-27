@@ -6,7 +6,7 @@ A small, experimental local PC agent for Windows. **Bridge Desk is the main inte
 
 ## Versioning
 
-The current version is `2.2.2`. Version numbers use `MAJOR.FEATURE.FIX`; the first version under this scheme was `1.1.1`. A new major series starts at `.0.0`. For follow-up changes, increment `FIX` for bug fixes and small corrections; after `.100`, roll over to the next `FEATURE` and reset `FIX` to 1. Increment `FEATURE` for a new capability and reset `FIX` to 1. Increment `MAJOR` for a major change and reset both lower numbers to 0. For example, `1.4.100` becomes `1.5.1` for the next fix, the desktop-first setup was `2.1.1`, app-only chat deletion was `2.2.1`, and this release quotes launcher paths with spaces as `2.2.2`; the next major series starts at `3.0.0`.
+The current version is `2.2.3`. Version numbers use `MAJOR.FEATURE.FIX`; the first version under this scheme was `1.1.1`. A new major series starts at `.0.0`. For follow-up changes, increment `FIX` for bug fixes and small corrections; after `.100`, roll over to the next `FEATURE` and reset `FIX` to 1. Increment `FEATURE` for a new capability and reset `FIX` to 1. Increment `MAJOR` for a major change and reset both lower numbers to 0. For example, `1.4.100` becomes `1.5.1` for the next fix, the desktop-first setup was `2.1.1`, app-only chat deletion was `2.2.1`, launcher paths with spaces were fixed in `2.2.2`, and this release recognizes Gemini's rendered tool-call text as `2.2.3`; the next major series starts at `3.0.0`.
 
 ## Features
 

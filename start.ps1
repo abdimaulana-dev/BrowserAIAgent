@@ -39,10 +39,17 @@ function Get-BridgeDeskState([string]$Url) {
     }
 }
 
+function Get-ListenerPid([int]$Port) {
+    $pattern = '^\s*TCP\s+\S+:' + [regex]::Escape([string]$Port) + '\s+\S+\s+LISTENING\s+(?<pid>\d+)\s*$'
+    $line = netstat.exe -ano -p TCP | Where-Object { $_ -match $pattern } | Select-Object -First 1
+    if ($line -and $line -match $pattern) { return [int]$Matches.pid }
+    return $null
+}
+
 $bridgeReady = Test-LocalService "http://127.0.0.1:5050/health"
 $appUrl = "http://127.0.0.1:5100"
 $appState = Get-BridgeDeskState "$appUrl/api/state"
-$appReady = $appState -and $appState.app_version -eq "2.2.2"
+$appReady = $appState -and $appState.app_version -eq "2.2.3"
 if ($appState -and -not $appReady) {
     throw "Another or older app is using port 5100. Close that app, then run .\start.bat again."
 }
@@ -59,7 +66,7 @@ if (-not $bridgeReady) {
         -ArgumentList ('"{0}"' -f $bridgeScript) `
         -WorkingDirectory $project -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput $bridgeLog -RedirectStandardError $bridgeError
-    $started += [pscustomobject]@{ pid = $process.Id; scriptPath = $bridgeScript }
+    $started += [pscustomobject]@{ launcherPid = $process.Id; port = 5050; scriptPath = $bridgeScript }
 }
 
 if (-not $appReady) {
@@ -70,16 +77,7 @@ if (-not $appReady) {
         -ArgumentList ('"{0}"' -f $appScript) `
         -WorkingDirectory $desktopApp -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput $appLog -RedirectStandardError $appError
-    $started += [pscustomobject]@{ pid = $process.Id; scriptPath = $appScript }
-}
-
-if ($started.Count) {
-    $tracked = @()
-    if (Test-Path $statePath) {
-        try { $tracked = @(Get-Content $statePath -Raw | ConvertFrom-Json) } catch { $tracked = @() }
-    }
-    $tracked += $started
-    $tracked | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 $statePath
+    $started += [pscustomobject]@{ launcherPid = $process.Id; port = 5100; scriptPath = $appScript }
 }
 
 $deadline = (Get-Date).AddSeconds(30)
@@ -87,14 +85,32 @@ do {
     Start-Sleep -Milliseconds 500
     $bridgeReady = Test-LocalService "http://127.0.0.1:5050/health"
     $appState = Get-BridgeDeskState "$appUrl/api/state"
-    $appReady = $appState -and $appState.app_version -eq "2.2.2"
+    $appReady = $appState -and $appState.app_version -eq "2.2.3"
 } until (($bridgeReady -and $appReady) -or (Get-Date) -ge $deadline)
 
 if (-not ($bridgeReady -and $appReady)) {
     foreach ($item in $started) {
-        Stop-Process -Id $item.pid -Force -ErrorAction SilentlyContinue
+        & taskkill.exe /PID ([int]$item.launcherPid) /T /F | Out-Null
     }
     throw "Bridge Desk did not start. Check the latest logs in .local\logs."
+}
+
+if ($started.Count) {
+    $tracked = @()
+    if (Test-Path $statePath) {
+        try { $tracked = @(Get-Content $statePath -Raw | ConvertFrom-Json) } catch { $tracked = @() }
+    }
+    foreach ($item in $started) {
+        $listenerPid = Get-ListenerPid ([int]$item.port)
+        if (-not $listenerPid) { throw "Could not record the listener on port $($item.port)." }
+        $listener = Get-Process -Id $listenerPid -ErrorAction Stop
+        $tracked += [pscustomobject]@{
+            pid = $listenerPid
+            scriptPath = $item.scriptPath
+            startTimeFileTimeUtc = [string]$listener.StartTime.ToFileTimeUtc()
+        }
+    }
+    $tracked | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 $statePath
 }
 
 Start-Process $appUrl

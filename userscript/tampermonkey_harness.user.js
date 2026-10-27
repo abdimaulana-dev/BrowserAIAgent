@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Browser Chat PC Agent Harness (v2.2.1)
+// @name         Browser Chat PC Agent Harness (v2.2.2)
 // @namespace    local-pc-agent
-// @version      2.2.1
+// @version      2.2.2
 // @description  Bridges Gemini tool calls to a token-protected local PC agent.
 // @match        https://gemini.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -42,7 +42,7 @@
   panel.style.cssText = "position:fixed;bottom:20px;right:20px;z-index:999999;background:#1e1e2e;color:#cdd6f4;padding:12px;border-radius:10px;font-family:monospace;box-shadow:0 4px 12px rgba(0,0,0,.5);width:280px;";
 
   const title = document.createElement("div");
-  title.textContent = "Local PC Agent Harness v2.2.1";
+  title.textContent = "Local PC Agent Harness v2.2.2";
   title.style.cssText = "font-weight:bold;margin-bottom:8px;font-size:13px;";
 
   const runButton = document.createElement("button");

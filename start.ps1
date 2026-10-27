@@ -42,7 +42,7 @@ function Get-BridgeDeskState([string]$Url) {
 $bridgeReady = Test-LocalService "http://127.0.0.1:5050/health"
 $appUrl = "http://127.0.0.1:5100"
 $appState = Get-BridgeDeskState "$appUrl/api/state"
-$appReady = $appState -and $appState.app_version -eq "2.1.1"
+$appReady = $appState -and $appState.app_version -eq "2.2.2"
 if ($appState -and -not $appReady) {
     throw "Another or older app is using port 5100. Close that app, then run .\start.bat again."
 }
@@ -54,21 +54,23 @@ New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 if (-not $bridgeReady) {
     $bridgeLog = Join-Path $logDir "bridge-$stamp.log"
     $bridgeError = Join-Path $logDir "bridge-$stamp.err.log"
+    $bridgeScript = Join-Path $project "server\harness_server.py"
     $process = Start-Process -FilePath $python `
-        -ArgumentList @((Join-Path $project "server\harness_server.py")) `
+        -ArgumentList ('"{0}"' -f $bridgeScript) `
         -WorkingDirectory $project -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput $bridgeLog -RedirectStandardError $bridgeError
-    $started += [pscustomobject]@{ pid = $process.Id; scriptPath = (Join-Path $project "server\harness_server.py") }
+    $started += [pscustomobject]@{ pid = $process.Id; scriptPath = $bridgeScript }
 }
 
 if (-not $appReady) {
     $appLog = Join-Path $logDir "desktop-app-$stamp.log"
     $appError = Join-Path $logDir "desktop-app-$stamp.err.log"
+    $appScript = Join-Path $desktopApp "app.py"
     $process = Start-Process -FilePath $python `
-        -ArgumentList @((Join-Path $desktopApp "app.py")) `
+        -ArgumentList ('"{0}"' -f $appScript) `
         -WorkingDirectory $desktopApp -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput $appLog -RedirectStandardError $appError
-    $started += [pscustomobject]@{ pid = $process.Id; scriptPath = (Join-Path $desktopApp "app.py") }
+    $started += [pscustomobject]@{ pid = $process.Id; scriptPath = $appScript }
 }
 
 if ($started.Count) {
@@ -85,7 +87,7 @@ do {
     Start-Sleep -Milliseconds 500
     $bridgeReady = Test-LocalService "http://127.0.0.1:5050/health"
     $appState = Get-BridgeDeskState "$appUrl/api/state"
-    $appReady = $appState -and $appState.app_version -eq "2.1.1"
+    $appReady = $appState -and $appState.app_version -eq "2.2.2"
 } until (($bridgeReady -and $appReady) -or (Get-Date) -ge $deadline)
 
 if (-not ($bridgeReady -and $appReady)) {

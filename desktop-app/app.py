@@ -17,7 +17,7 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template, request
 
 ROOT = Path(__file__).resolve().parent
-APP_VERSION = "2.2.1"
+APP_VERSION = "2.2.2"
 
 
 def load_env_file():

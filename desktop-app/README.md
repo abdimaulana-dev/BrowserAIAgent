@@ -1,4 +1,4 @@
-# Bridge Desk 2.2.1
+# Bridge Desk 2.2.2
 
 A small local chat UI for BrowserAIBridge. Gemini runs in a separate Chrome profile controlled by Playwright; there is no Gemini API key and no Tampermonkey userscript. The app calls the existing Python bridge for tools.
 

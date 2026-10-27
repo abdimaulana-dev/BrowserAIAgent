@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bridge Desk</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">B</span><span>Bridge Desk</span></div>
+      <div class="section-label">WORKSPACE</div>
+      <button class="workspace active"><span class="workspace-dot"></span> BrowserAIBridge</button>
+      <div class="section-label conversations-label">CHATS</div>
+      <button id="newChat" class="new-chat">＋ New chat</button>
+      <div id="chatList" class="chat-list"></div>
+      <div class="sidebar-note">AI runs in a separate background browser session.</div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <div class="title-wrap">
+          <div class="mobile-brand">B</div>
+          <div><h1 id="chatTitle">New chat</h1><p id="status">Connecting to Gemini…</p></div>
+        </div>
+        <div class="top-actions">
+          <label class="toggle">
+            <input id="showDetails" type="checkbox">
+            <span class="switch"></span>
+            <span>Show tool activity</span>
+          </label>
+        </div>
+      </header>
+      <section id="transcript" class="transcript" aria-live="polite">
+        <div class="welcome">
+          <div class="welcome-icon">✦</div>
+          <h2>Your local AI workspace</h2>
+          <p>Send a request. Gemini runs in the background and can use the tools allowed by your Python bridge.</p>
+        </div>
+      </section>
+      <form id="composer" class="composer">
+        <textarea id="message" rows="1" maxlength="12000" placeholder="Message your PC agent…" aria-label="Message your PC agent"></textarea>
+        <div class="composer-footer">
+          <span>Tool changes and shell commands ask for approval.</span>
+          <button id="send" type="submit" aria-label="Send message">↑</button>
+        </div>
+      </form>
+      <div class="footnote">Your messages are sent to the signed-in Gemini webpage. Tool access stays limited by your local bridge.</div>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

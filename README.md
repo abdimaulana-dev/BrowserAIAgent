@@ -4,6 +4,10 @@ A small, experimental bridge between **Gemini in your browser** and a **local Py
 
 > **Status:** Prototype. Review the code before running it. This is not a standards-compliant MCP server and does not provide general mouse, keyboard, or application control. It can run shell commands after explicit browser approval.
 
+## Versioning
+
+The current version is `2.0.0`. Version numbers use `MAJOR.FEATURE.FIX`; the first version under this scheme was `1.1.1`. A new major series starts at `.0.0`. For follow-up changes, increment `FIX` for bug fixes and small corrections; after `.100`, roll over to the next `FEATURE` and reset `FIX` to 1. Increment `FEATURE` for a new capability and reset `FIX` to 1. Increment `MAJOR` for a major change and reset both lower numbers to 0. For example, `1.4.100` becomes `1.5.1` for the next fix, and this major release starts at `2.0.0`.
+
 ## Features
 
 - Gemini + Tampermonkey browser workflow
@@ -13,6 +17,7 @@ A small, experimental bridge between **Gemini in your browser** and a **local Py
 - Tools for PC stats, workspace search and file operations, plus user-approved shell commands
 - Manual execution by default; shell commands show a review dialog before running
 - Optional auto-execution for read-only tools
+- Optional Bridge Desk chat app with a background Gemini browser and persistent conversations
 
 ## Project layout
 
@@ -20,6 +25,11 @@ A small, experimental bridge between **Gemini in your browser** and a **local Py
 local-pc-agent-harness/
 ├── server/
 │   └── harness_server.py
+├── desktop-app/
+│   ├── app.py
+│   ├── initial_prompt.md
+│   ├── static/
+│   └── templates/
 ├── userscript/
 │   └── tampermonkey_harness.user.js
 ├── setup.ps1
@@ -60,7 +70,7 @@ Keep the PowerShell window open while using the bridge. To choose another worksp
 
 1. Open Tampermonkey and choose **Create a new script**.
 2. Open `.local\tampermonkey_harness.user.js`, copy its contents into the editor, and save.
-3. Reload Gemini. **Auto-execute tools (confirm shell)** is off by default. When enabled, valid calls run after their `exect` marker, including file changes. Shell commands always open an approval dialog and run only after you accept. With auto-execute off, file changes require **Execute Last JSON Tool**. **Auto-send reply in chat** controls ordinary tool replies; approved shell commands send a running acknowledgement and then their final result to Gemini.
+3. Reload Gemini. **Auto-execute tools (confirm shell)** is off by default. When enabled, valid calls run after their `exect` marker, including file changes. Shell commands always open an approval dialog and run only after you accept. With auto-execute off, file changes require **Execute Last JSON Tool**. **Auto-send reply in chat** controls ordinary tool replies; approved shell commands send one final result to Gemini after the server responds.
 
 The generated script contains the same token as `.env`. Both files are ignored by Git. Keep them private; this token is a basic local guard rather than a strong security boundary against other software running as your Windows user.
 
@@ -99,6 +109,17 @@ For file listing, use:
 exect
 
 For `read_file`, `filename` must be a path relative to the workspace. With auto-execute off, tool calls that change files run only when you click **Execute Last JSON Tool**. A valid `run_command` call with its `exect` marker opens the shell approval dialog when auto-execute is off.
+
+## Optional: Bridge Desk chat app
+
+Bridge Desk provides a separate local chat window that talks to Gemini through a dedicated Chrome profile and connects to this repo's local server. It uses the signed-in Gemini webpage, so no Gemini API key is needed.
+
+1. In a second PowerShell window, enter `desktop-app` and install its requirements with `pip install -r requirements.txt`.
+2. Copy `.env.example` to `.env` and set `MCP_AUTH_TOKEN` to the token from the repo-root `.env`.
+3. Run `python app.py --login`, sign in to Gemini in the regular Chrome window, close it, then press Enter.
+4. Run `python app.py` and open `http://127.0.0.1:5100`.
+
+Bridge Desk saves chat state locally in ignored files. File changes and shell commands require approval. See [`desktop-app/README.md`](desktop-app/README.md) for setup details and known limitations.
 
 ## Available tools
 

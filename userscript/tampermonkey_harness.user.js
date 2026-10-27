@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Browser Chat PC Agent Harness (v1.2.1)
+// @name         Browser Chat PC Agent Harness (v2.0.0)
 // @namespace    local-pc-agent
-// @version      1.2.1
+// @version      2.0.0
 // @description  Bridges Gemini tool calls to a token-protected local PC agent.
 // @match        https://gemini.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -42,7 +42,7 @@
   panel.style.cssText = "position:fixed;bottom:20px;right:20px;z-index:999999;background:#1e1e2e;color:#cdd6f4;padding:12px;border-radius:10px;font-family:monospace;box-shadow:0 4px 12px rgba(0,0,0,.5);width:280px;";
 
   const title = document.createElement("div");
-  title.textContent = "Local PC Agent Harness v1.2.1";
+  title.textContent = "Local PC Agent Harness v2.0.0";
   title.style.cssText = "font-weight:bold;margin-bottom:8px;font-size:13px;";
 
   const runButton = document.createElement("button");
@@ -138,6 +138,12 @@
     return matches;
   }
 
+  function toolCallBlocks() {
+    const blocks = queryAllIncludingOpenShadow("pre, code");
+    const codeBlocks = blocks.filter(block => block.tagName === "CODE");
+    return codeBlocks.length ? codeBlocks : blocks.filter(block => block.tagName === "PRE");
+  }
+
   function triggerContext(block) {
     let current = block;
     for (let depth = 0; current && depth < 15; depth++, current = parentAcrossShadow(current)) {
@@ -188,24 +194,40 @@
     return JSON.stringify([payload.tool, Object.entries(payload.args).sort(([a], [b]) => a.localeCompare(b))]);
   }
 
-  function callKeyFor(signature, context) {
+  function callKeyFor(signature, context, occurrence = null) {
     let hash = 2166136261;
-    for (const character of signature + "\n" + context) {
+    const identity = signature + "\n" + context +
+      (occurrence === null ? "" : "\noccurrence:" + occurrence);
+    for (const character of identity) {
       hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
     }
     return "mcp_handled_" + (hash >>> 0).toString(36);
   }
 
-  function wasHandledAcrossRefreshes(callKey) {
+  function occurrenceFor(blocks, index, payload, context) {
+    const signature = signatureFor(payload);
+    let occurrence = 0;
+    for (let priorIndex = 0; priorIndex < index; priorIndex++) {
+      const text = (blocks[priorIndex].innerText || blocks[priorIndex].textContent || "")
+        .replace(/^\s*json\s*(?:\r?\n|$)/i, "").trim();
+      const priorPayload = parseToolCall(text);
+      if (priorPayload && signatureFor(priorPayload) === signature &&
+          triggerContext(blocks[priorIndex]) === context) occurrence++;
+    }
+    return occurrence;
+  }
+
+  function wasHandledAcrossRefreshes(callKey, legacyCallKey, occurrence) {
     try {
-      return sessionStorage.getItem(callKey) === "true";
+      return sessionStorage.getItem(callKey) === "true" ||
+        (occurrence === 0 && sessionStorage.getItem(legacyCallKey) === "true");
     } catch (_) {
       return false;
     }
   }
 
   function findLatestToolCall(autoMode, onlyTool = null) {
-    const blocks = queryAllIncludingOpenShadow("pre, code");
+    const blocks = toolCallBlocks();
     for (let index = blocks.length - 1; index >= 0; index--) {
       const block = blocks[index];
       const rawText = (block.innerText || block.textContent || "").trim();
@@ -218,9 +240,10 @@
       const context = payload && triggerContext(block);
       if (!payload || !context) continue;
       const signature = signatureFor(payload);
-      const callKey = callKeyFor(signature, context);
+      const occurrence = occurrenceFor(blocks, index, payload, context);
+      const callKey = callKeyFor(signature, context, occurrence);
       if (executedSignatures.has(callKey) || pendingSignatures.has(callKey)) continue;
-      if (wasHandledAcrossRefreshes(callKey)) continue;
+      if (wasHandledAcrossRefreshes(callKey, callKeyFor(signature, context), occurrence)) continue;
       if (autoMode && autoAttemptedSignatures.has(callKey)) continue;
 
       return { payload, element: block, rawText, signature, callKey };
@@ -229,7 +252,7 @@
   }
 
   function diagnoseLatestToolCall(onlyTool = null) {
-    const blocks = queryAllIncludingOpenShadow("pre, code");
+    const blocks = toolCallBlocks();
     if (!blocks.length) return "No code blocks found in the page. The response may not have rendered as a code block.";
 
     let hasToolMarker = false;
@@ -270,9 +293,11 @@
       }
 
       const signature = signatureFor(payload);
-      const callKey = callKeyFor(signature, context);
+      const occurrence = occurrenceFor(blocks, index, payload, context);
+      const callKey = callKeyFor(signature, context, occurrence);
       if (block.getAttribute("data-mcp-executed") === "true" ||
-          executedSignatures.has(callKey) || wasHandledAcrossRefreshes(callKey)) {
+          executedSignatures.has(callKey) ||
+          wasHandledAcrossRefreshes(callKey, callKeyFor(signature, context), occurrence)) {
         alreadyHandled = true;
         continue;
       }
@@ -324,24 +349,42 @@
       return Promise.resolve(false);
     }
 
-    status.textContent = "Reply inserted; attempting to send...";
-    return new Promise(resolve => setTimeout(() => {
-      const sendButton = Array.from(document.querySelectorAll(
-        'button[aria-label="Send message"], button[aria-label="Send"]'
-      )).find(button => button.getClientRects().length > 0 && !button.disabled &&
-        button.getAttribute("aria-disabled") !== "true");
-      if (sendButton) {
-        sendButton.click();
-        status.textContent = "Send button clicked; check that the reply appeared in chat.";
-        resolve(true);
-      } else {
-        inputBox.dispatchEvent(new KeyboardEvent("keydown", {
-          bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13
-        }));
-        status.textContent = "Enter key pressed; check whether the reply was sent.";
-        resolve(true);
-      }
-    }, 150));
+    status.textContent = "Reply inserted; waiting for Gemini to finish before sending...";
+    return new Promise(resolve => {
+      const deadline = Date.now() + 30000;
+      const trySend = () => {
+        const selector = [
+          'button[aria-label*="send" i]',
+          'button[data-tooltip*="send" i]',
+          'button.mdc-icon-button.mat-mdc-icon-button.mat-mdc-button-base.mat-badge.mat-unthemed.mat-badge-overlap.mat-badge-above.mat-badge-after.mat-badge-small.mat-badge-hidden.ng-star-inserted'
+        ].join(", ");
+        let container = inputBox;
+        let sendButton = null;
+        while (container && container !== document) {
+          const buttons = queryAllIncludingOpenShadow(selector, container).filter(button =>
+            button.getClientRects().length > 0 && !button.disabled &&
+            button.getAttribute("aria-disabled") !== "true" &&
+            !/stop|cancel/i.test((button.getAttribute("aria-label") || "") + " " +
+              (button.getAttribute("data-tooltip") || "")));
+          if (buttons.length) {
+            if (buttons.length === 1) sendButton = buttons[0];
+            break;
+          }
+          container = parentAcrossShadow(container);
+        }
+        if (sendButton) {
+          sendButton.click();
+          status.textContent = "Reply sent to Gemini.";
+          resolve(true);
+        } else if (Date.now() >= deadline) {
+          status.textContent = "Reply is in the composer, but its send button was unavailable or ambiguous. Send it manually.";
+          resolve(false);
+        } else {
+          setTimeout(trySend, 300);
+        }
+      };
+      setTimeout(trySend, 300);
+    });
   }
 
   function approveCommand(command, purpose, seconds, waitUntilCompleted) {
@@ -448,19 +491,8 @@
       const seconds = target.payload.args.seconds ?? 15;
       const waitUntilCompleted = target.payload.args.wait_until_completed ?? false;
       status.textContent = waitUntilCompleted
-        ? "Approved. Sending acknowledgement, then waiting up to " + seconds + " seconds."
-        : "Approved. Sending acknowledgement, then launching without waiting for completion.";
-      const acknowledgement = {
-        tool: "run_command",
-        status: "running",
-        result: {
-          message: waitUntilCompleted
-            ? "The user approved the command. It is running; wait for the final result, which will arrive within the requested wait or time out."
-            : "The user approved the command. It is launching without waiting for completion; the final result confirms launch, not completion or output.",
-          purpose: target.payload.args.purpose
-        }
-      };
-      await insertIntoChat("```json\n" + JSON.stringify(acknowledgement, null, 2) + "\n```", true);
+        ? "Approved. Waiting up to " + seconds + " seconds for the command result."
+        : "Approved. Launching the command and waiting for its start result.";
     } else {
       status.textContent = "Running " + target.payload.tool + "...";
     }

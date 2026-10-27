@@ -13,3 +13,15 @@ venv/
 .idea/
 .DS_Store
 Thumbs.db
+
+/AGENTS.md
+
+# Bridge Desk local settings, browser profile, and chat state
+/desktop-app/.env
+/desktop-app/.gemini-profile/
+/desktop-app/.venv/
+/desktop-app/__pycache__/
+/desktop-app/*.py[cod]
+/desktop-app/chat-history.json
+/desktop-app/chat-state.json
+/desktop-app/chats.json

@@ -17,6 +17,7 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template, request
 
 ROOT = Path(__file__).resolve().parent
+APP_VERSION = "2.1.1"
 
 
 def load_env_file():
@@ -425,6 +426,7 @@ def get_events():
 @app.get("/api/state")
 def get_state():
     return jsonify({
+        "app_version": APP_VERSION,
         "title": chat_title,
         "active_chat_id": active_chat_id,
         "chats": [{"id": chat["id"], "title": chat.get("title") or "New chat"} for chat in chats],

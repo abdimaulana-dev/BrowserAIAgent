@@ -1,4 +1,4 @@
-# Bridge Desk 2.0.0
+# Bridge Desk 2.1.1
 
 A small local chat UI for BrowserAIBridge. Gemini runs in a separate Chrome profile controlled by Playwright; there is no Gemini API key and no Tampermonkey userscript. The app calls the existing Python bridge for tools.
 
@@ -8,24 +8,17 @@ A small local chat UI for BrowserAIBridge. Gemini runs in a separate Chrome prof
 - Google Chrome
 - The existing BrowserAIBridge server configured and running at http://127.0.0.1:5050
 
-## Setup
+## Recommended setup
 
-1. Create a virtual environment and install this prototype's dependencies:
-   python -m venv .venv
-   .venv\Scripts\activate
-   pip install -r requirements.txt
-   python -m playwright install chrome
+From the repository folder, double-click `setup.bat`, finish the one-time Gemini sign-in when Chrome opens, then double-click `start.bat`. The app and local bridge start together, and the chat opens in your browser. Double-click `stop.bat` when you're done.
 
-2. Copy .env.example to .env. Set MCP_AUTH_TOKEN to the same value used in BrowserAIBridge/.env. The token stays in this local server process and is never sent to the web page.
+If Gemini needs sign-in again, run `login.bat` from the repository folder. Setup logs are saved under `.local/logs`.
 
-3. Sign in once using a dedicated browser profile in regular Chrome:
-   python app.py --login
-   Sign in to Gemini, close that Chrome window, then return to the terminal and press Enter. This uses normal Chrome for Google login, which avoids the automated-browser warning.
+## Manual setup
 
-4. Start the app:
-   python app.py
+For a standalone copy, create a virtual environment, install `requirements.txt`, install Chrome with `python -m playwright install chrome`, copy `.env.example` to `.env`, and set `MCP_AUTH_TOKEN` to the value used by the existing bridge. Then run `python app.py --login`, sign in through the regular Chrome window, close it, and run `python app.py`.
 
-5. Open http://127.0.0.1:5100. Gemini's browser runs headlessly in the background by default.
+The token stays in the local server process and is never sent to the web page. Gemini's browser runs headlessly by default.
 
 ## Prototype behavior
 

@@ -1,23 +1,22 @@
 # Local PC Agent Harness
 
-A small, experimental bridge between **Gemini in your browser** and a **local Python server on Windows**. A Tampermonkey userscript detects explicitly marked JSON tool calls in a Gemini response and sends them to the local server. The server exposes a small allowlist of tools for PC stats and file operations inside one workspace directory.
+A small, experimental local PC agent for Windows. **Bridge Desk is the main interface**: it gives you a clean chat window, uses your signed-in Gemini webpage in a background Chrome profile, and connects to the local Python bridge. The Tampermonkey flow remains available as an alternate interface.
 
 > **Status:** Prototype. Review the code before running it. This is not a standards-compliant MCP server and does not provide general mouse, keyboard, or application control. It can run shell commands after explicit browser approval.
 
 ## Versioning
 
-The current version is `2.0.0`. Version numbers use `MAJOR.FEATURE.FIX`; the first version under this scheme was `1.1.1`. A new major series starts at `.0.0`. For follow-up changes, increment `FIX` for bug fixes and small corrections; after `.100`, roll over to the next `FEATURE` and reset `FIX` to 1. Increment `FEATURE` for a new capability and reset `FIX` to 1. Increment `MAJOR` for a major change and reset both lower numbers to 0. For example, `1.4.100` becomes `1.5.1` for the next fix, and this major release starts at `2.0.0`.
+The current version is `2.1.1`. Version numbers use `MAJOR.FEATURE.FIX`; the first version under this scheme was `1.1.1`. A new major series starts at `.0.0`. For follow-up changes, increment `FIX` for bug fixes and small corrections; after `.100`, roll over to the next `FEATURE` and reset `FIX` to 1. Increment `FEATURE` for a new capability and reset `FIX` to 1. Increment `MAJOR` for a major change and reset both lower numbers to 0. For example, `1.4.100` becomes `1.5.1` for the next fix, this release adds the desktop-first setup as `2.1.1`, and the next major series starts at `3.0.0`.
 
 ## Features
 
-- Gemini + Tampermonkey browser workflow
+- Bridge Desk chat app with saved conversations and a background Gemini browser
 - Local Flask server bound to `127.0.0.1:5050`
 - Shared-token request authentication
 - File operations restricted to a configured workspace
 - Tools for PC stats, workspace search and file operations, plus user-approved shell commands
-- Manual execution by default; shell commands show a review dialog before running
-- Optional auto-execution for read-only tools
-- Optional Bridge Desk chat app with a background Gemini browser and persistent conversations
+- File changes and shell commands require approval in Bridge Desk
+- Optional Tampermonkey workflow for using Gemini directly in a browser
 
 ## Project layout
 
@@ -32,8 +31,14 @@ local-pc-agent-harness/
 │   └── templates/
 ├── userscript/
 │   └── tampermonkey_harness.user.js
+├── setup.bat
 ├── setup.ps1
+├── login.bat
+├── start.bat
 ├── start.ps1
+├── stop.bat
+├── stop.ps1
+├── stop.bat
 ├── docs/
 │   └── SECURITY.md
 ├── requirements.txt
@@ -44,47 +49,39 @@ local-pc-agent-harness/
 ## Requirements
 
 - Windows with Python 3.10+ (newer versions may work; not all have been tested)
-- Google Chrome or another browser supported by Tampermonkey
-- Tampermonkey extension
+- Google Chrome
 - Gemini at `https://gemini.google.com/`
 
-## 1. Set up and start the server
+## Quick start: Bridge Desk
 
-Double-click `setup.bat` in the project folder. Or run this from PowerShell:
+1. Double-click `setup.bat`. It installs the bridge and app dependencies, creates the local token and workspace, and opens a regular Chrome window for Gemini sign-in on first setup.
+2. Sign in to Gemini in that window, close it, and press Enter in the setup window.
+3. Double-click `start.bat`. It starts the local bridge and chat app in the background, then opens Bridge Desk in your browser at `http://127.0.0.1:5100`.
+4. When finished, double-click `stop.bat` to stop the background processes.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\setup.ps1
-```
+If Gemini needs sign-in again, double-click `login.bat`. Setup logs are saved in `.local\logs` if the app does not start.
 
-Setup creates a virtual environment, installs dependencies, generates a private token in `.env`, and prepares the workspace at `PC-Agent-Workspace` in your user folder. It also creates a ready-to-import userscript at `.local\tampermonkey_harness.user.js`.
+Setup is safe to rerun. It reuses the existing workspace and token and refreshes the desktop app's private configuration.
 
-Double-click `start.bat` to run the server. Or use PowerShell:
+## Optional: use Gemini directly with Tampermonkey
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\start.ps1
-```
-
-Keep the PowerShell window open while using the bridge. To choose another workspace, edit `PC_AGENT_WORKSPACE` in `.env`, then run setup again. Use a dedicated test folder; avoid folders containing secrets or important files.
-
-## 2. Install the Tampermonkey userscript
+Bridge Desk setup also prepares `.local\tampermonkey_harness.user.js` for the alternate browser workflow:
 
 1. Open Tampermonkey and choose **Create a new script**.
-2. Open `.local\tampermonkey_harness.user.js`, copy its contents into the editor, and save.
-3. Reload Gemini. **Auto-execute tools (confirm shell)** is off by default. When enabled, valid calls run after their `exect` marker, including file changes. Shell commands always open an approval dialog and run only after you accept. With auto-execute off, file changes require **Execute Last JSON Tool**. **Auto-send reply in chat** controls ordinary tool replies; approved shell commands send one final result to Gemini after the server responds.
+2. Import or paste `.local\tampermonkey_harness.user.js` and save it.
+3. Start only the bridge with `powershell -ExecutionPolicy Bypass -File .\start.ps1 -BridgeOnly`, then reload Gemini.
 
-The generated script contains the same token as `.env`. Both files are ignored by Git. Keep them private; this token is a basic local guard rather than a strong security boundary against other software running as your Windows user.
+This workflow uses the same private token in `.env` and the generated userscript. Both files are ignored by Git. Keep them private; the token is a basic local guard, not a security boundary against other software running as your Windows user.
 
-## 3. Test the connection
+## Check the bridge connection
 
-For a reusable prompt with all current tools and the security rules, open [`docs/INITIAL_PROMPT.md`](docs/INITIAL_PROMPT.md) and use the code block's copy button to copy the full prompt into Gemini.
-
-Open `http://127.0.0.1:5050/health` in your browser. Expected response:
+With Bridge Desk running, open `http://127.0.0.1:5050/health`. Expected response:
 
 ```json
 {"status":"ok"}
 ```
 
-Then use Gemini to produce a tool call in this format. The word `exect` must appear immediately after the closing code fence:
+For the Tampermonkey workflow, the reusable prompt is in [`docs/INITIAL_PROMPT.md`](docs/INITIAL_PROMPT.md). A tool call uses this format, with `exect` immediately after the JSON code fence:
 
 ```json
 {
@@ -95,7 +92,7 @@ Then use Gemini to produce a tool call in this format. The word `exect` must app
 ```
 exect
 
-Click **Execute Last JSON Tool** in the userscript panel. The result should be inserted into the Gemini composer for you to review. Send it manually unless you intentionally enabled auto-send.
+In Tampermonkey, click **Execute Last JSON Tool** to run the call. The result is inserted into Gemini for review; send it manually unless you enable auto-send.
 
 For file listing, use:
 
@@ -109,17 +106,6 @@ For file listing, use:
 exect
 
 For `read_file`, `filename` must be a path relative to the workspace. With auto-execute off, tool calls that change files run only when you click **Execute Last JSON Tool**. A valid `run_command` call with its `exect` marker opens the shell approval dialog when auto-execute is off.
-
-## Optional: Bridge Desk chat app
-
-Bridge Desk provides a separate local chat window that talks to Gemini through a dedicated Chrome profile and connects to this repo's local server. It uses the signed-in Gemini webpage, so no Gemini API key is needed.
-
-1. In a second PowerShell window, enter `desktop-app` and install its requirements with `pip install -r requirements.txt`.
-2. Copy `.env.example` to `.env` and set `MCP_AUTH_TOKEN` to the token from the repo-root `.env`.
-3. Run `python app.py --login`, sign in to Gemini in the regular Chrome window, close it, then press Enter.
-4. Run `python app.py` and open `http://127.0.0.1:5100`.
-
-Bridge Desk saves chat state locally in ignored files. File changes and shell commands require approval. See [`desktop-app/README.md`](desktop-app/README.md) for setup details and known limitations.
 
 ## Available tools
 

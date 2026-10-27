@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import queue
 import re
@@ -17,7 +18,7 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template, request
 
 ROOT = Path(__file__).resolve().parent
-APP_VERSION = "2.2.4"
+APP_VERSION = "2.2.5"
 
 
 def load_env_file():
@@ -561,4 +562,5 @@ if __name__ == "__main__":
         threading.Thread(target=browser_worker, daemon=True, name="gemini-browser").start()
         publish("status", "Starting background Gemini browser…")
         print(f"Bridge Desk is listening on http://127.0.0.1:{PORT}")
+        logging.getLogger("werkzeug").setLevel(logging.WARNING)
         app.run(host="127.0.0.1", port=PORT, debug=False, threaded=True)

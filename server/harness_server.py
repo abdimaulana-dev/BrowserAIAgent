@@ -8,6 +8,7 @@ Security notes:
 - This is a custom HTTP tool bridge, not a standards-based MCP protocol server.
 """
 import hmac
+import logging
 import os
 import platform
 import subprocess
@@ -505,4 +506,5 @@ if __name__ == "__main__":
     print("[*] Local PC Agent running on http://127.0.0.1:5050")
     print(f"[*] Workspace: {WORKSPACE_DIR}")
     print("[*] Authentication: enabled; keep the token private.")
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
     app.run(host="127.0.0.1", port=5050, debug=False, threaded=True)

@@ -49,7 +49,7 @@ function Get-ListenerPid([int]$Port) {
 $bridgeReady = Test-LocalService "http://127.0.0.1:5050/health"
 $appUrl = "http://127.0.0.1:5100"
 $appState = Get-BridgeDeskState "$appUrl/api/state"
-$appReady = $appState -and $appState.app_version -eq "2.2.4"
+$appReady = $appState -and $appState.app_version -eq "2.2.5"
 if ($bridgeReady -or $appReady) {
     throw "Bridge Desk is already running outside this command window. Close the existing app first so this window can control it."
 }
@@ -71,7 +71,7 @@ try {
         Start-Sleep -Milliseconds 500
         $bridgeReady = Test-LocalService "http://127.0.0.1:5050/health"
         $appState = Get-BridgeDeskState "$appUrl/api/state"
-        $appReady = $appState -and $appState.app_version -eq "2.2.4"
+        $appReady = $appState -and $appState.app_version -eq "2.2.5"
     } until (($bridgeReady -and $appReady) -or (Get-Date) -ge $deadline)
 
     if (-not ($bridgeReady -and $appReady)) {

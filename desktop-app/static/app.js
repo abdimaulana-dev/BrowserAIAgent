@@ -7,6 +7,11 @@ const detailsToggle = document.getElementById("showDetails");
 const chatTitle = document.getElementById("chatTitle");
 const chatList = document.getElementById("chatList");
 const newChatButton = document.getElementById("newChat");
+const deleteChatButton = document.getElementById("deleteChat");
+const deleteDialog = document.getElementById("deleteDialog");
+const cancelDeleteButton = document.getElementById("cancelDelete");
+const confirmDeleteButton = document.getElementById("confirmDelete");
+const deleteError = document.getElementById("deleteError");
 let events = [];
 let lastId = 0;
 let knownActiveChatId = null;
@@ -88,6 +93,7 @@ async function refreshState() {
     chatTitle.textContent = state.title;
     newChatButton.disabled = state.busy;
     sendButton.disabled = state.busy;
+    deleteChatButton.disabled = state.busy || !state.can_delete;
     chatList.replaceChildren();
     for (const chat of state.chats) {
       const button = document.createElement("button");
@@ -151,6 +157,44 @@ newChatButton.addEventListener("click", async () => {
   } catch (error) {
     statusLine.textContent = error.message;
   }
+});
+
+deleteChatButton.addEventListener("click", () => {
+  deleteError.hidden = true;
+  deleteError.textContent = "";
+  deleteDialog.hidden = false;
+  cancelDeleteButton.focus();
+});
+
+cancelDeleteButton.addEventListener("click", () => {
+  deleteDialog.hidden = true;
+  deleteChatButton.focus();
+});
+
+deleteDialog.addEventListener("click", event => {
+  if (event.target === deleteDialog) deleteDialog.hidden = true;
+});
+
+confirmDeleteButton.addEventListener("click", async () => {
+  confirmDeleteButton.disabled = true;
+  try {
+    const state = await (await fetch("/api/state")).json();
+    await postJson("/api/chat/delete-local", {id: state.active_chat_id});
+    deleteDialog.hidden = true;
+    events = [];
+    lastId = 0;
+    await refreshState();
+    await loadCurrentTranscript();
+  } catch (error) {
+    deleteError.textContent = error.message;
+    deleteError.hidden = false;
+  } finally {
+    confirmDeleteButton.disabled = false;
+  }
+});
+
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && !deleteDialog.hidden) deleteDialog.hidden = true;
 });
 
 async function decide(id, approved, card) {

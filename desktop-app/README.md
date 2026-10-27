@@ -1,4 +1,4 @@
-# Bridge Desk 2.1.1
+# Bridge Desk 2.2.1
 
 A small local chat UI for BrowserAIBridge. Gemini runs in a separate Chrome profile controlled by Playwright; there is no Gemini API key and no Tampermonkey userscript. The app calls the existing Python bridge for tools.
 
@@ -28,6 +28,7 @@ The token stays in the local server process and is never sent to the web page. G
 - The app binds to 127.0.0.1. Keep the bridge server restricted to localhost too.
 - The first message names the chat in the app. The transcript and Gemini conversation link are saved locally, so the same chat can be reopened after refreshing or restarting the app.
 - Use **New chat** to start another saved conversation, or select an earlier one in the sidebar. Local chat history is stored in `chats.json`, which is ignored by Git.
+- **Delete chat** removes the selected chat and its saved transcript from Bridge Desk only. It does not delete the conversation from Gemini; it remains in Gemini chat history.
 - `initial_prompt.md` is sent only with the first message in a Gemini chat. Edit that file to change the agent's starting instructions.
 
 ## Known limits

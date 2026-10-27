@@ -17,7 +17,7 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template, request
 
 ROOT = Path(__file__).resolve().parent
-APP_VERSION = "2.1.1"
+APP_VERSION = "2.2.1"
 
 
 def load_env_file():
@@ -149,6 +149,17 @@ def activate_chat(chat):
 
 def make_new_chat():
     return {"id": uuid.uuid4().hex, "title": "New chat", "url": "", "events": []}
+
+
+def can_delete_active_chat():
+    return len(chats) > 1 or any(event.get("type") == "user" for event in events)
+
+
+def remove_local_chat(chat_id):
+    chats[:] = [chat for chat in chats if chat.get("id") != chat_id]
+    if not chats:
+        chats.append(make_new_chat())
+    activate_chat(chats[0])
 
 
 def make_chat_title(text):
@@ -431,6 +442,7 @@ def get_state():
         "active_chat_id": active_chat_id,
         "chats": [{"id": chat["id"], "title": chat.get("title") or "New chat"} for chat in chats],
         "busy": busy,
+        "can_delete": can_delete_active_chat(),
     })
 
 
@@ -457,6 +469,21 @@ def select_chat():
             return jsonify({"error": "Chat not found."}), 404
         activate_chat(target)
     return jsonify({"accepted": True})
+
+
+@app.post("/api/chat/delete-local")
+def delete_local_chat():
+    data = request.get_json(silent=True)
+    target_id = data.get("id") if isinstance(data, dict) else None
+    with busy_lock:
+        if busy:
+            return jsonify({"error": "Wait for the current reply to finish before deleting this chat."}), 409
+        if target_id != active_chat_id:
+            return jsonify({"error": "Select this chat before deleting it."}), 400
+        if not can_delete_active_chat():
+            return jsonify({"error": "This empty chat cannot be deleted yet."}), 400
+        remove_local_chat(target_id)
+    return jsonify({"accepted": True, "deleted_from": "app_only"})
 
 
 @app.post("/api/chat")

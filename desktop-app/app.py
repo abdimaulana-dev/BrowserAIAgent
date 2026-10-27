@@ -17,7 +17,7 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template, request
 
 ROOT = Path(__file__).resolve().parent
-APP_VERSION = "2.2.3"
+APP_VERSION = "2.2.4"
 
 
 def load_env_file():
@@ -267,13 +267,17 @@ def send_to_gemini(page, prompt):
     ]
     composer = None
     for selector in composer_selectors:
-        candidate = page.locator(selector).last
+        candidates = page.locator(selector)
         try:
-            if candidate.count() and candidate.is_visible():
-                composer = candidate
-                break
+            for index in range(candidates.count()):
+                candidate = candidates.nth(index)
+                if candidate.is_visible() and candidate.is_enabled() and candidate.is_editable():
+                    composer = candidate
+                    break
         except Exception:
             continue
+        if composer is not None:
+            break
     if composer is None:
         try:
             details = page.evaluate("""() => {
@@ -295,16 +299,27 @@ def send_to_gemini(page, prompt):
 
     before = len(response_texts(page))
     composer.fill(prompt, timeout=20000)
-    send_button = page.locator(
+    send_buttons = page.locator(
         'button[aria-label*="send" i]:not([aria-label*="stop" i]), '
         'button[data-tooltip*="send" i]:not([data-tooltip*="stop" i])'
-    ).last
-    if send_button.count() and send_button.is_visible() and send_button.is_enabled():
+    )
+    send_button = None
+    for index in range(send_buttons.count() - 1, -1, -1):
+        candidate = send_buttons.nth(index)
+        try:
+            if candidate.is_visible() and candidate.is_enabled():
+                send_button = candidate
+                break
+        except Exception:
+            continue
+    if send_button is not None:
         # Never retry with Enter after a click error: the click may already have
         # submitted the message before Playwright reported a timeout.
         send_button.click(timeout=10000)
     else:
-        composer.press("Enter")
+        # Filling can replace Gemini's textarea; send through the focused page
+        # instead of resolving a stale textarea locator again.
+        page.keyboard.press("Enter")
 
     deadline = time.monotonic() + 240
     last_text = ""
@@ -328,7 +343,6 @@ def send_to_gemini(page, prompt):
                     save_chat_state()
                 return current
     raise TimeoutError("Gemini did not finish a response within four minutes.")
-
 
 def handle_turn(page, user_text, initialize_session=False):
     publish("status", "Sending your message to Gemini…")
@@ -359,7 +373,9 @@ def browser_worker():
         return
 
     try:
+        publish("status", "Starting background Chrome browser…")
         with sync_playwright() as playwright:
+            publish("status", "Opening Gemini in the background browser…")
             context = playwright.chromium.launch_persistent_context(
                 user_data_dir=str(PROFILE_DIR),
                 channel="chrome",
@@ -367,6 +383,7 @@ def browser_worker():
             )
             page = context.pages[0] if context.pages else context.new_page()
             resume_url = chat_url if chat_url.startswith("https://gemini.google.com/") else "https://gemini.google.com/app"
+            publish("status", "Loading Gemini…")
             page.goto(resume_url, wait_until="domcontentloaded", timeout=60000)
             if "accounts.google.com" in page.url:
                 publish("status", "Gemini is not signed in. Stop this app and run: python app.py --login")
@@ -397,6 +414,8 @@ def browser_worker():
                     jobs.task_done()
             context.close()
     except Exception as exc:
+        with busy_lock:
+            busy = False
         publish("status", f"Could not start the background Chrome session: {exc}")
 
 

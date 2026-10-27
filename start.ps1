@@ -49,57 +49,36 @@ function Get-ListenerPid([int]$Port) {
 $bridgeReady = Test-LocalService "http://127.0.0.1:5050/health"
 $appUrl = "http://127.0.0.1:5100"
 $appState = Get-BridgeDeskState "$appUrl/api/state"
-$appReady = $appState -and $appState.app_version -eq "2.2.3"
-if ($appState -and -not $appReady) {
-    throw "Another or older app is using port 5100. Close that app, then run .\start.bat again."
+$appReady = $appState -and $appState.app_version -eq "2.2.4"
+if ($bridgeReady -or $appReady) {
+    throw "Bridge Desk is already running outside this command window. Close the existing app first so this window can control it."
 }
+
 $started = @()
-$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$logDir = Join-Path $localDir "logs"
-New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-
-if (-not $bridgeReady) {
-    $bridgeLog = Join-Path $logDir "bridge-$stamp.log"
-    $bridgeError = Join-Path $logDir "bridge-$stamp.err.log"
+try {
     $bridgeScript = Join-Path $project "server\harness_server.py"
-    $process = Start-Process -FilePath $python `
-        -ArgumentList ('"{0}"' -f $bridgeScript) `
-        -WorkingDirectory $project -WindowStyle Hidden -PassThru `
-        -RedirectStandardOutput $bridgeLog -RedirectStandardError $bridgeError
+    $process = Start-Process -FilePath $python -ArgumentList ('"{0}"' -f $bridgeScript) `
+        -WorkingDirectory $project -NoNewWindow -PassThru
     $started += [pscustomobject]@{ launcherPid = $process.Id; port = 5050; scriptPath = $bridgeScript }
-}
 
-if (-not $appReady) {
-    $appLog = Join-Path $logDir "desktop-app-$stamp.log"
-    $appError = Join-Path $logDir "desktop-app-$stamp.err.log"
     $appScript = Join-Path $desktopApp "app.py"
-    $process = Start-Process -FilePath $python `
-        -ArgumentList ('"{0}"' -f $appScript) `
-        -WorkingDirectory $desktopApp -WindowStyle Hidden -PassThru `
-        -RedirectStandardOutput $appLog -RedirectStandardError $appError
+    $process = Start-Process -FilePath $python -ArgumentList ('"{0}"' -f $appScript) `
+        -WorkingDirectory $desktopApp -NoNewWindow -PassThru
     $started += [pscustomobject]@{ launcherPid = $process.Id; port = 5100; scriptPath = $appScript }
-}
 
-$deadline = (Get-Date).AddSeconds(30)
-do {
-    Start-Sleep -Milliseconds 500
-    $bridgeReady = Test-LocalService "http://127.0.0.1:5050/health"
-    $appState = Get-BridgeDeskState "$appUrl/api/state"
-    $appReady = $appState -and $appState.app_version -eq "2.2.3"
-} until (($bridgeReady -and $appReady) -or (Get-Date) -ge $deadline)
+    $deadline = (Get-Date).AddSeconds(30)
+    do {
+        Start-Sleep -Milliseconds 500
+        $bridgeReady = Test-LocalService "http://127.0.0.1:5050/health"
+        $appState = Get-BridgeDeskState "$appUrl/api/state"
+        $appReady = $appState -and $appState.app_version -eq "2.2.4"
+    } until (($bridgeReady -and $appReady) -or (Get-Date) -ge $deadline)
 
-if (-not ($bridgeReady -and $appReady)) {
-    foreach ($item in $started) {
-        & taskkill.exe /PID ([int]$item.launcherPid) /T /F | Out-Null
+    if (-not ($bridgeReady -and $appReady)) {
+        throw "Bridge Desk did not start. Review the errors shown in this command window."
     }
-    throw "Bridge Desk did not start. Check the latest logs in .local\logs."
-}
 
-if ($started.Count) {
     $tracked = @()
-    if (Test-Path $statePath) {
-        try { $tracked = @(Get-Content $statePath -Raw | ConvertFrom-Json) } catch { $tracked = @() }
-    }
     foreach ($item in $started) {
         $listenerPid = Get-ListenerPid ([int]$item.port)
         if (-not $listenerPid) { throw "Could not record the listener on port $($item.port)." }
@@ -110,9 +89,19 @@ if ($started.Count) {
             startTimeFileTimeUtc = [string]$listener.StartTime.ToFileTimeUtc()
         }
     }
+    New-Item -ItemType Directory -Force -Path $localDir | Out-Null
     $tracked | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 $statePath
-}
 
-Start-Process $appUrl
-Write-Host "Bridge Desk is open in your browser."
-Write-Host "To stop the background app and bridge, run .\stop.bat."
+    Start-Process $appUrl
+    Write-Host "Bridge Desk is running. Keep this command window open; closing it stops the app and bridge."
+    while ((Test-LocalService "http://127.0.0.1:5050/health") -and (Test-LocalService "$appUrl/api/state")) {
+        Start-Sleep -Seconds 1
+    }
+} finally {
+    foreach ($item in $started) {
+        if (Get-Process -Id ([int]$item.launcherPid) -ErrorAction SilentlyContinue) {
+            & taskkill.exe /PID ([int]$item.launcherPid) /T /F 2>$null | Out-Null
+        }
+    }
+    if (Test-Path $statePath) { Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue }
+}

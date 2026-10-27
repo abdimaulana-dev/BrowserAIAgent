@@ -6,7 +6,7 @@ A small, experimental local PC agent for Windows. **Bridge Desk is the main inte
 
 ## Versioning
 
-The current version is `2.2.3`. Version numbers use `MAJOR.FEATURE.FIX`; the first version under this scheme was `1.1.1`. A new major series starts at `.0.0`. For follow-up changes, increment `FIX` for bug fixes and small corrections; after `.100`, roll over to the next `FEATURE` and reset `FIX` to 1. Increment `FEATURE` for a new capability and reset `FIX` to 1. Increment `MAJOR` for a major change and reset both lower numbers to 0. For example, `1.4.100` becomes `1.5.1` for the next fix, the desktop-first setup was `2.1.1`, app-only chat deletion was `2.2.1`, launcher paths with spaces were fixed in `2.2.2`, and this release recognizes Gemini's rendered tool-call text as `2.2.3`; the next major series starts at `3.0.0`.
+The current version is `2.2.4`. Version numbers use `MAJOR.FEATURE.FIX`; the first version under this scheme was `1.1.1`. A new major series starts at `.0.0`. For follow-up changes, increment `FIX` for bug fixes and small corrections; after `.100`, roll over to the next `FEATURE` and reset `FIX` to 1. Increment `FEATURE` for a new capability and reset `FIX` to 1. Increment `MAJOR` for a major change and reset both lower numbers to 0. For example, `1.4.100` becomes `1.5.1` for the next fix, the desktop-first setup was `2.1.1`, app-only chat deletion was `2.2.1`, launcher paths with spaces were fixed in `2.2.2`, Gemini rendered tool-call text support was added in `2.2.3`, and `2.2.4` improves Gemini composer submission and keeps the app attached to its command window; the next major series starts at `3.0.0`.
 
 ## Features
 
@@ -57,10 +57,10 @@ local-pc-agent-harness/
 
 1. Double-click `setup.bat`. It installs the bridge and app dependencies, creates the local token and workspace, and opens a regular Chrome window for Gemini sign-in on first setup.
 2. Sign in to Gemini in that window, close it, and press Enter in the setup window.
-3. Double-click `start.bat`. It starts the local bridge and chat app in the background, then opens Bridge Desk in your browser at `http://127.0.0.1:5100`.
-4. When finished, double-click `stop.bat` to stop the background processes.
+3. Double-click `start.bat`. It starts the local bridge and chat app in the same command window, then opens Bridge Desk in your browser at `http://127.0.0.1:5100`. Keep that window open while using the app; closing it stops both services.
+4. When finished, close the command window or double-click `stop.bat` to stop Bridge Desk and the local bridge.
 
-If Gemini needs sign-in again, double-click `login.bat`. Setup logs are saved in `.local\logs` if the app does not start.
+If Gemini needs sign-in again, double-click `login.bat`. Startup errors appear in the command window.
 
 Setup is safe to rerun. It reuses the existing workspace and token and refreshes the desktop app's private configuration.
 
